@@ -2,7 +2,7 @@ services:
   - type: web
     name: nexus-agri-platform
     runtime: python
-    buildCommand: bash build.sh
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: gunicorn --chdir backend app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION

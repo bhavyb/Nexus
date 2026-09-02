@@ -16,7 +16,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from prophet import Prophet
+try:
+    from prophet import Prophet
+except ImportError:
+    Prophet = None
 from sklearn.linear_model import Ridge
 
 from data_cleaner import clean_text
@@ -38,11 +41,14 @@ def get_model_path(crop: str, mandi: str) -> str:
     return os.path.join(MODELS_DIR, f"{sanitize_filename(crop)}__{sanitize_filename(mandi)}.pkl")
 
 
-def train_prophet_model(df: pd.DataFrame) -> Tuple[Prophet, pd.DataFrame]:
+def train_prophet_model(df: pd.DataFrame) -> Tuple[Any, pd.DataFrame]:
     """
     Fits a Facebook Prophet model on historical arrival data.
     df must contain columns 'ds' and 'y'.
     """
+    if Prophet is None:
+        raise ImportError("Facebook Prophet is not installed. Using Ridge regression fallback.")
+
     # Daily seasonality, weekly seasonality enabled for agricultural mandi trading
     model = Prophet(
         daily_seasonality=False,
