@@ -1,0 +1,24 @@
+# Node
+frontend/node_modules/
+frontend/.vite/
+
+# Python
+backend/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Environment Variables
+.env
+backend/.env
+
+# Temporary / OS
+.DS_Store
+Thumbs.db
+*.log
+.tools/
+scratch/
