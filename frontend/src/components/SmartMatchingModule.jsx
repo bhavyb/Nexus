@@ -450,6 +450,45 @@ export default function SmartMatchingModule({
                     <Truck size={16} /> {orderingBestFarmer ? 'Booking Delivery...' : 'Order & Book Farmgate Delivery'}
                   </button>
 
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.setItem(
+                        'anndhana_route_target_buyer',
+                        JSON.stringify({
+                          name: user?.name || 'Direct Buyer Hub',
+                          buyer_name: user?.name || 'Direct Buyer Hub',
+                          location: buyerLocation,
+                          demand_kg: buyerQty,
+                          crop: buyerCrop,
+                          farmer_pickup: {
+                            farmer_name: bestFarmerResult.best_match.farmer_name,
+                            location: bestFarmerResult.best_match.farmer_location,
+                            load_kg: Number(buyerQty),
+                            crop: buyerCrop,
+                            price_per_kg: bestFarmerResult.best_match.price_per_kg
+                          }
+                        })
+                      );
+                      if (onNavigateToLogistics) onNavigateToLogistics();
+                    }}
+                    className="btn-secondary"
+                    style={{
+                      padding: '11px 18px',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      color: '#7C3AED',
+                      border: '1px solid #C4B5FD',
+                      background: '#F5F3FF',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Sparkles size={16} color="#7C3AED" /> 🚚 AI Route Optimization
+                  </button>
+
                   <a
                     href={`https://wa.me/${(bestFarmerResult.best_match.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
                       `Namaste ${bestFarmerResult.best_match.farmer_name}, I saw your ${bestFarmerResult.best_match.crop} listing on annDhana and would like to order ${buyerQty} kg.`
@@ -839,13 +878,50 @@ export default function SmartMatchingModule({
                       </div>
                     </div>
 
-                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem' }}>
-                      <span style={{ color: 'var(--color-text-secondary)' }}>
-                        Price: <strong>₹{item.price_per_kg}/kg</strong>
-                      </span>
-                      <span style={{ color: 'var(--color-crop)', fontWeight: 700 }}>
-                        {item.status}
-                      </span>
+                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.74rem' }}>
+                        <span style={{ color: 'var(--color-text-secondary)' }}>
+                          Price: <strong>₹{item.price_per_kg}/kg</strong>
+                        </span>
+                        <span style={{ color: 'var(--color-crop)', fontWeight: 700 }}>
+                          {item.status}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          localStorage.setItem(
+                            'anndhana_route_target_buyer',
+                            JSON.stringify({
+                              name: item.buyer_name,
+                              buyer_name: item.buyer_name,
+                              location: item.location,
+                              demand_kg: item.allocated_quantity_kg,
+                              crop: selectedCrop,
+                              order_total: item.order_total_inr
+                            })
+                          );
+                          if (onNavigateToLogistics) onNavigateToLogistics();
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          background: '#F5F3FF',
+                          color: '#6D28D9',
+                          border: '1px solid #DDD6FE',
+                          borderRadius: '6px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Truck size={13} color="#7C3AED" /> 🚚 AI Route Optimization for this Buyer
+                      </button>
                     </div>
                   </div>
                 ))}

@@ -841,24 +841,33 @@ def api_logistics_dynamic_match():
 # 6. CAPACITATED ROUTE OPTIMIZATION & SHARED LOGISTICS
 # -----------------------------------------------------------------------------
 
-@app.route("/api/route-optimize", methods=["POST"])
+@app.route("/api/route-optimize", methods=["GET", "POST"])
 def api_route_optimize():
     """
-    POST /api/route-optimize
-    Solves shared vehicle routing (multi-pickup, multi-drop) and returns distance/cost/CO2 savings.
+    GET/POST /api/route-optimize
+    Solves shared vehicle routing (multi-pickup, multi-drop) and returns distance/cost/CO2 savings,
+    stop sequences, capacity constraints, benchmark comparisons, and farmer net realization uplift.
     """
-    payload = request.get_json(force=True, silent=True) or {}
+    if request.method == "POST":
+        payload = request.get_json(force=True, silent=True) or {}
+    else:
+        payload = request.args.to_dict()
+
     vehicle_cap = float(payload.get("vehicle_capacity_kg", 1000.0))
     cost_km = float(payload.get("cost_per_km", 24.0))
     pickups = payload.get("pickups")
     deliveries = payload.get("deliveries")
+    destination = payload.get("destination")
+    depot_location = payload.get("depot_location")
 
     try:
         route_data = optimize_shared_logistics_route(
             pickups=pickups,
             deliveries=deliveries,
+            destination=destination,
             vehicle_capacity_kg=vehicle_cap,
-            cost_per_km=cost_km
+            cost_per_km=cost_km,
+            depot_location=depot_location
         )
         return jsonify({"success": True, "data": route_data})
     except Exception as e:
