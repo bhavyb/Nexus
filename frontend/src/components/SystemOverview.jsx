@@ -122,7 +122,7 @@ export default function SystemOverview({ onNavigate }) {
           >
             Moving beyond simple e-commerce: annDhara predicts demand before harvest, connects
             farmers & FPOs directly with institutional bulk buyers and apartment community pools,
-            optimizes multi-stop shared logistics, and halts perishable food waste in its tracks.
+            optimizes multi-stop shared logistics, and secures transactions with driver-exclusive OTP handoffs.
           </p>
 
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
@@ -385,8 +385,8 @@ export default function SystemOverview({ onNavigate }) {
                 Shared Vehicle Optimization
               </div>
               <div style={{ fontSize: '0.76rem', color: 'var(--color-soil-dark)' }}>
-                <strong>5. Waste Prevention</strong><br />
-                Dynamic Processor Rerouting
+                <strong>5. Secure Verification</strong><br />
+                Two-Sided OTP Handshake
               </div>
             </div>
           </div>

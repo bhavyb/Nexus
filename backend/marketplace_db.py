@@ -10,6 +10,7 @@ Provides persistent SQLite storage for:
 
 import logging
 import os
+import random
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -192,9 +193,17 @@ def init_db():
             ("current_location", "TEXT DEFAULT ''"),
             ("vehicle_number", "TEXT DEFAULT ''"),
             ("eta", "TEXT DEFAULT ''"),
+            ("pickup_otp", "TEXT DEFAULT ''"),
+            ("delivery_otp", "TEXT DEFAULT ''"),
+            ("pickup_verified_at", "TEXT DEFAULT ''"),
+            ("delivery_verified_at", "TEXT DEFAULT ''"),
         ):
             if column not in delivery_columns:
                 cursor.execute(f"ALTER TABLE delivery_updates ADD COLUMN {column} {definition}")
+
+        # Ensure existing deliveries have valid 4-digit verification OTPs
+        cursor.execute("UPDATE delivery_updates SET pickup_otp = '4821' WHERE pickup_otp IS NULL OR pickup_otp = ''")
+        cursor.execute("UPDATE delivery_updates SET delivery_otp = '7395' WHERE delivery_otp IS NULL OR delivery_otp = ''")
 
         conn.commit()
 
@@ -794,18 +803,22 @@ def create_delivery_assignment(
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     reference = f"NX-{datetime.now().strftime('%y%m%d%H%M%S')}-{abs(hash((crop, farmer_name, buyer_name, now))) % 1000:03d}"
     loc = current_location.strip() or f"Awaiting pickup dispatch at {pickup_location.strip()}"
+    p_otp = f"{random.randint(1000, 9999)}"
+    d_otp = f"{random.randint(1000, 9999)}"
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """INSERT INTO delivery_updates
                (reference, crop, quantity_kg, farmer_name, buyer_name, logistics_name,
                 pickup_location, destination, status, updated_at, listing_id, demand_id,
-                logistics_id, accepted_at, created_at, current_location, vehicle_number, eta)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Assigned', ?, ?, ?, ?, '', ?, ?, ?, ?)""",
+                logistics_id, accepted_at, created_at, current_location, vehicle_number, eta,
+                pickup_otp, delivery_otp, pickup_verified_at, delivery_verified_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Assigned', ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, '', '')""",
             (reference, clean_text(crop), float(quantity_kg), clean_text(farmer_name),
              clean_text(buyer_name), clean_text(logistics_name) or "Unassigned",
              clean_text(pickup_location), clean_text(destination), now, listing_id,
-             demand_id, logistics_id, now, loc, clean_text(vehicle_number), clean_text(eta)),
+             demand_id, logistics_id, now, loc, clean_text(vehicle_number), clean_text(eta),
+             p_otp, d_otp),
         )
         conn.commit()
         row = cursor.execute("SELECT * FROM delivery_updates WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -894,7 +907,78 @@ def get_delivery_updates(role: Optional[str] = None, stakeholder: Optional[str] 
     query += " ORDER BY updated_at DESC, id DESC"
     with get_db_connection() as conn:
         rows = conn.execute(query, params).fetchall()
-        return [dict(row) for row in rows]
+        deliveries = []
+        for row in rows:
+            d = dict(row)
+            if normalized_role == "farmer":
+                d["delivery_otp"] = ""
+            elif normalized_role == "customer":
+                d["pickup_otp"] = ""
+            elif normalized_role == "logistics":
+                d["demo_pickup_otp"] = d.get("pickup_otp", "")
+                d["demo_delivery_otp"] = d.get("delivery_otp", "")
+            deliveries.append(d)
+        return deliveries
+
+
+def verify_delivery_pickup(reference: str, otp: str) -> Optional[Dict[str, Any]]:
+    """Validates Farmer Pickup OTP and transitions delivery to 'Picked Up'."""
+    clean_ref = reference.strip()
+    clean_otp = str(otp).strip()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        row = cursor.execute("SELECT * FROM delivery_updates WHERE reference = ?", (clean_ref,)).fetchone()
+        if not row:
+            raise ValueError(f"Delivery reference {clean_ref} not found")
+
+        expected_otp = str(row["pickup_otp"] or "").strip() or "4821"
+        if clean_otp != expected_otp:
+            raise ValueError(f"Invalid Farmer Pickup OTP '{clean_otp}'. Please collect the correct 4-digit code from the farmer at farmgate.")
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_loc = f"Produce verified & loaded at {row['pickup_location']} via Farmer OTP; in transit"
+        cursor.execute(
+            """UPDATE delivery_updates
+               SET status = 'Picked Up',
+                   pickup_verified_at = ?,
+                   current_location = ?,
+                   updated_at = ?
+               WHERE reference = ?""",
+            (now, new_loc, now, clean_ref)
+        )
+        conn.commit()
+        updated = cursor.execute("SELECT * FROM delivery_updates WHERE reference = ?", (clean_ref,)).fetchone()
+        return dict(updated) if updated else None
+
+
+def verify_delivery_dropoff(reference: str, otp: str) -> Optional[Dict[str, Any]]:
+    """Validates Buyer Delivery OTP and transitions delivery to 'Delivered'."""
+    clean_ref = reference.strip()
+    clean_otp = str(otp).strip()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        row = cursor.execute("SELECT * FROM delivery_updates WHERE reference = ?", (clean_ref,)).fetchone()
+        if not row:
+            raise ValueError(f"Delivery reference {clean_ref} not found")
+
+        expected_otp = str(row["delivery_otp"] or "").strip() or "7395"
+        if clean_otp != expected_otp:
+            raise ValueError(f"Invalid Buyer Delivery OTP '{clean_otp}'. Please collect the correct 4-digit code from the buyer upon delivery.")
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_loc = f"Successfully delivered & verified at {row['destination']} via Customer OTP"
+        cursor.execute(
+            """UPDATE delivery_updates
+               SET status = 'Delivered',
+                   delivery_verified_at = ?,
+                   current_location = ?,
+                   updated_at = ?
+               WHERE reference = ?""",
+            (now, new_loc, now, clean_ref)
+        )
+        conn.commit()
+        updated = cursor.execute("SELECT * FROM delivery_updates WHERE reference = ?", (clean_ref,)).fetchone()
+        return dict(updated) if updated else None
 
 
 def accept_delivery(
@@ -996,14 +1080,16 @@ def seed_delivery_updates_if_empty() -> None:
             """
             INSERT INTO delivery_updates
                 (reference, crop, quantity_kg, farmer_name, buyer_name, logistics_name,
-                 pickup_location, destination, status, updated_at, current_location, vehicle_number, eta)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 pickup_location, destination, status, updated_at, current_location, vehicle_number, eta,
+                 pickup_otp, delivery_otp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "ADH-1001", "Tomato", 500, "Gujarat Agro Collective",
                 "FreshBasket Retail", "ABC Logistics", "Gondal Farm Gate",
                 "Ahmedabad Distribution Hub", "In Transit", now,
-                "En route on SG Highway (near Prahlad Nagar)", "GJ-01-ET-8412", "Today 03:30 PM"
+                "En route on SG Highway (near Prahlad Nagar)", "GJ-01-ET-8412", "Today 03:30 PM",
+                "4821", "7395"
             ),
         )
         conn.commit()

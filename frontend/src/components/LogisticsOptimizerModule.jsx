@@ -32,13 +32,21 @@ import {
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
 
 export default function LogisticsOptimizerModule() {
-  const [activeSubTab, setActiveSubTab] = useState('live-orders'); // 'live-orders', 'matching', 'fleet', 'comparison'
+  const [activeSubTab, setActiveSubTab] = useState('live-orders'); // 'live-orders', 'matching', 'fleet'
   const [vehicleType, setVehicleType] = useState('Mini Truck (Tata Ace)');
   const [vehicleCapacity, setVehicleCapacity] = useState(1000);
   const [ratePerKm, setRatePerKm] = useState(24.0);
 
   const [routeData, setRouteData] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Dynamic Matching & Live Deliveries State
+  const [liveDeliveries, setLiveDeliveries] = useState([]);
+  const [selectedOrderRef, setSelectedOrderRef] = useState('');
+  const [dynamicCandidates, setDynamicCandidates] = useState([]);
+  const [loadingDynamic, setLoadingDynamic] = useState(false);
+  const [assignMessage, setAssignMessage] = useState('');
+  const [customSimLoad, setCustomSimLoad] = useState(500);
 
   // Fleet state
   const [fleetList, setFleetList] = useState([]);
@@ -53,6 +61,52 @@ export default function LogisticsOptimizerModule() {
     vehicle_number: ''
   });
   const [registering, setRegistering] = useState(false);
+
+  // Fetch Live Orders
+  const fetchLiveDeliveries = () => {
+    fetch('/api/deliveries?role=logistics')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.deliveries) {
+          const valid = data.deliveries.filter(
+            (d) => !(d.farmer_name || '').toLowerCase().includes('test')
+          );
+          setLiveDeliveries(valid);
+          if (valid.length > 0 && !selectedOrderRef) {
+            setSelectedOrderRef(valid[0].reference);
+          }
+        }
+      })
+      .catch((err) => console.error('Error fetching deliveries:', err));
+  };
+
+  // Run Dynamic Vehicle Matching
+  const runDynamicVehicleMatch = (orderRef) => {
+    const targetOrder = liveDeliveries.find((d) => d.reference === orderRef) || liveDeliveries[0];
+    const loadKg = targetOrder ? targetOrder.quantity_kg : customSimLoad;
+    const pickupLoc = targetOrder ? targetOrder.pickup_location : 'Ahmedabad';
+    const dropLoc = targetOrder ? targetOrder.destination : 'Ahmedabad';
+
+    setLoadingDynamic(true);
+    setAssignMessage('');
+    fetch('/api/logistics/dynamic-match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        load_kg: Number(loadKg),
+        pickup_location: pickupLoc,
+        destination: dropLoc
+      })
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.candidates) {
+          setDynamicCandidates(data.candidates);
+        }
+      })
+      .catch((err) => console.error('Error running dynamic match:', err))
+      .finally(() => setLoadingDynamic(false));
+  };
 
   // Fetch Route Data
   const fetchOptimizedRoute = () => {
@@ -92,7 +146,14 @@ export default function LogisticsOptimizerModule() {
   useEffect(() => {
     fetchOptimizedRoute();
     fetchFleet();
+    fetchLiveDeliveries();
   }, [vehicleCapacity, ratePerKm]);
+
+  useEffect(() => {
+    if (activeSubTab === 'matching') {
+      runDynamicVehicleMatch(selectedOrderRef);
+    }
+  }, [activeSubTab, selectedOrderRef, customSimLoad]);
 
   // Handle Partner Registration
   const handleRegisterPartner = (e) => {
@@ -121,6 +182,36 @@ export default function LogisticsOptimizerModule() {
       })
       .catch((err) => console.error('Error registering partner:', err))
       .finally(() => setRegistering(false));
+  };
+
+  // Assign vehicle to order in database
+  const handleAssignVehicle = async (vehicle) => {
+    const targetOrder = liveDeliveries.find((d) => d.reference === selectedOrderRef) || liveDeliveries[0];
+    if (!targetOrder) {
+      setAssignMessage('No active order selected to dispatch.');
+      return;
+    }
+    setAssignMessage('');
+    try {
+      const res = await fetch(`/api/deliveries/${targetOrder.reference}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          logistics_name: vehicle.company,
+          vehicle_number: vehicle.vehicle_number || 'GJ-01-ET-8412',
+          current_location: `Carrier ${vehicle.company} dispatched for produce pickup at ${targetOrder.pickup_location}`
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAssignMessage(`✓ Successfully assigned ${vehicle.company} (${vehicle.vehicle_number}) to order ${targetOrder.reference}!`);
+        fetchLiveDeliveries();
+      } else {
+        setAssignMessage(data.error || 'Assignment failed');
+      }
+    } catch (err) {
+      setAssignMessage('Network error while assigning vehicle.');
+    }
   };
 
   return (
@@ -221,26 +312,6 @@ export default function LogisticsOptimizerModule() {
           >
             <Users size={15} color="#2563EB" /> 2. Fleet ({fleetList.length})
           </button>
-
-          <button
-            onClick={() => setActiveSubTab('comparison')}
-            style={{
-              padding: '8px 14px',
-              borderRadius: '8px',
-              border: 'none',
-              background: activeSubTab === 'comparison' ? 'white' : 'transparent',
-              color: activeSubTab === 'comparison' ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)',
-              fontWeight: 700,
-              fontSize: '0.82rem',
-              cursor: 'pointer',
-              boxShadow: activeSubTab === 'comparison' ? 'var(--shadow-sm)' : 'none',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <TrendingDown size={15} color="#059669" /> 3. Savings
-          </button>
         </div>
       </div>
 
@@ -252,95 +323,168 @@ export default function LogisticsOptimizerModule() {
       )}
 
       {/* ========================================================================= */}
-      {/* SUB-TAB 1: SMART VEHICLE MATCHING ALGORITHM (JUDGE READY)                 */}
+      {/* SUB-TAB 1: DYNAMIC SMART VEHICLE MATCHING ALGORITHM                       */}
       {/* ========================================================================= */}
       {activeSubTab === 'matching' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Formula Callout Banner */}
+          {/* Header Controls: Live Order Selector */}
           <div
             style={{
               background: 'white',
               border: '1px solid var(--color-border)',
               borderRadius: 'var(--radius-lg)',
-              padding: '20px 24px'
+              padding: '20px 24px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px'
             }}
           >
-            <div style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--color-crop)', textTransform: 'uppercase' }}>
-              Intelligent Multi-Criteria Vehicle Selection Engine
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <div style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--color-crop)', textTransform: 'uppercase' }}>
+                  Dynamic Fleet Matching Engine
+                </div>
+                <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '4px 0 2px 0' }}>
+                  AI Multi-Criteria Logistics Partner Matching
+                </h3>
+                <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
+                  Evaluates vehicle capacity fit, proximity to farmgate pickup, and driver reliability scores from your registered fleet in real-time.
+                </div>
+              </div>
+
+              <button
+                className="btn-secondary"
+                onClick={() => runDynamicVehicleMatch(selectedOrderRef)}
+                disabled={loadingDynamic}
+                style={{ padding: '8px 16px', fontSize: '0.8rem', fontWeight: 700 }}
+              >
+                <RefreshCw size={14} className={loadingDynamic ? 'spin-icon' : ''} />
+                {loadingDynamic ? 'Evaluating Fleet...' : 'Re-Calculate Matches'}
+              </button>
             </div>
-            <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '4px 0 8px 0' }}>
-              How annDhana AI Selects the Optimal Logistics Partner
-            </h3>
-            <div
-              style={{
-                background: 'var(--color-bg-subtle)',
-                padding: '12px 16px',
-                borderRadius: '8px',
-                fontFamily: 'monospace',
-                fontSize: '0.9rem',
-                color: 'var(--color-soil-dark)',
-                fontWeight: 700
-              }}
-            >
-              Best Vehicle = Capacity Match (40%) + Distance Proximity (30%) + Freight Cost (15%) + Reliability Score (15%)
-            </div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginTop: '8px' }}>
-              Aggregated produce load is <strong>950 kg</strong>. The AI algorithm evaluates all nearby available vehicles within 20 km to select the optimal fit.
+
+            {/* Select Live Order to Match */}
+            <div style={{ background: 'var(--color-bg-subtle)', padding: '14px 18px', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
+                  📦 Select Active Live Order to Dispatch:
+                </label>
+                {liveDeliveries.length > 0 && (
+                  <span style={{ fontSize: '0.74rem', color: 'var(--color-crop)', fontWeight: 700 }}>
+                    {liveDeliveries.length} active delivery orders in network
+                  </span>
+                )}
+              </div>
+
+              {liveDeliveries.length > 0 ? (
+                <select
+                  className="nexus-select"
+                  value={selectedOrderRef}
+                  onChange={(e) => {
+                    setSelectedOrderRef(e.target.value);
+                    runDynamicVehicleMatch(e.target.value);
+                  }}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: '0.85rem', fontWeight: 600, background: 'white' }}
+                >
+                  {liveDeliveries.map((order) => (
+                    <option key={order.reference} value={order.reference}>
+                      {order.reference} — {order.quantity_kg} kg {order.crop} (From {order.farmer_name} at {order.pickup_location} ➔ To {order.buyer_name} at {order.destination}) [{order.status}]
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', padding: '6px 0' }}>
+                  No pending orders currently in queue. Using standard produce simulation (500 kg from Ahmedabad).
+                </div>
+              )}
+
+              {assignMessage && (
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    background: assignMessage.startsWith('✓') ? '#ECFDF5' : '#FEF2F2',
+                    color: assignMessage.startsWith('✓') ? '#047857' : '#DC2626',
+                    border: `1px solid ${assignMessage.startsWith('✓') ? '#A7F3D0' : '#FECACA'}`
+                  }}
+                >
+                  {assignMessage}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* 3 Candidate Vehicles Evaluated */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
-            {routeData?.candidate_vehicles?.map((veh) => {
-              const isSelected = veh.status === 'SELECTED';
+          {/* Dynamic Candidate Vehicles List */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '16px' }}>
+            {dynamicCandidates.map((veh, idx) => {
+              const isBest = idx === 0;
               return (
                 <div
                   key={veh.id}
                   style={{
                     background: 'white',
-                    border: `2px solid ${isSelected ? 'var(--color-crop)' : 'var(--color-border)'}`,
+                    border: `2px solid ${isBest ? 'var(--color-crop)' : 'var(--color-border)'}`,
                     borderRadius: 'var(--radius-md)',
                     padding: '20px',
-                    boxShadow: isSelected ? 'var(--shadow-md)' : 'none',
+                    boxShadow: isBest ? 'var(--shadow-md)' : 'none',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
                     position: 'relative'
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <span style={{ fontSize: '0.78rem', fontWeight: 800, color: veh.status_color }}>
-                      {veh.badge}
-                    </span>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-muted)' }}>
-                      {veh.distance_km} km away
-                    </span>
-                  </div>
-
-                  <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
-                    {veh.name}
-                  </h4>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                    {veh.partner} • {veh.vehicle_type}
-                  </div>
-
-                  <div style={{ margin: '14px 0', background: 'var(--color-bg-subtle)', padding: '10px 12px', borderRadius: '6px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Capacity</div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>{veh.capacity_kg} kg</div>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 800, color: veh.status_color || 'var(--color-crop)' }}>
+                        {veh.badge}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-muted)' }}>
+                        ~{veh.distance_km} km proximity
+                      </span>
                     </div>
-                    <div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Reliability Score</div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#7C3AED' }}>{veh.reliability_score}/100 ⭐</div>
+
+                    <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                      {veh.company}
+                    </h4>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                      {veh.vehicle_type} • <strong>{veh.vehicle_number}</strong>
+                    </div>
+
+                    <div style={{ margin: '14px 0', background: 'var(--color-bg-subtle)', padding: '10px 12px', borderRadius: '6px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Capacity</div>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>{veh.capacity_kg} kg</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Reliability Score</div>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#7C3AED' }}>{veh.reliability_score}/100 ⭐</div>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: '0.78rem', color: isBest ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)', lineHeight: 1.45 }}>
+                      <strong>AI Evaluation:</strong> {veh.match_reason}
                     </div>
                   </div>
 
-                  <div style={{ fontSize: '0.78rem', color: isSelected ? 'var(--color-crop)' : 'var(--color-text-secondary)', lineHeight: 1.4 }}>
-                    <strong>Evaluation:</strong> {veh.match_reason}
+                  <div style={{ marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
+                    <button
+                      className="btn-primary"
+                      onClick={() => handleAssignVehicle(veh)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        fontSize: '0.8rem',
+                        fontWeight: 800,
+                        background: isBest ? 'var(--color-crop)' : '#2563EB',
+                        borderColor: isBest ? 'var(--color-crop)' : '#2563EB',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <Truck size={14} /> Assign {veh.company} to Order
+                    </button>
                   </div>
-
-                  {isSelected && (
-                    <div style={{ marginTop: '14px', background: '#E8F5E9', color: 'var(--color-crop)', padding: '6px 12px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 800, textAlign: 'center' }}>
-                      ✓ DISPATCHED TO ABC LOGISTICS
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -435,107 +579,6 @@ export default function LogisticsOptimizerModule() {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* SUB-TAB 4: SHARED LOGISTICS VS TRADITIONAL SYSTEM                         */}
-      {/* ========================================================================= */}
-      {activeSubTab === 'comparison' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Key Metrics Comparison */}
-          {metrics && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-              <div className="nexus-card" style={{ borderLeft: '4px solid #7C3AED' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-                  Total Highway Km Saved
-                </div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#7C3AED', marginTop: '4px' }}>
-                  {metrics.distance_saved_km} km
-                </div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--color-crop)', fontWeight: 600, marginTop: '2px' }}>
-                  ↓ {metrics.distance_saved_pct}% vs separate trips
-                </div>
-              </div>
-
-              <div className="nexus-card" style={{ borderLeft: '4px solid var(--color-crop)' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-                  Transportation Cost Saved
-                </div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--color-crop)', marginTop: '4px' }}>
-                  ₹{metrics.cost_saved_inr}
-                </div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--color-crop)', fontWeight: 600, marginTop: '2px' }}>
-                  ↓ {metrics.cost_reduction_pct}% freight reduction
-                </div>
-              </div>
-
-              <div className="nexus-card" style={{ borderLeft: '4px solid #2563EB' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-                  Carbon Emissions Averted
-                </div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#2563EB', marginTop: '4px' }}>
-                  {metrics.co2_saved_kg} kg CO₂
-                </div>
-                <div style={{ fontSize: '0.76rem', color: '#2563EB', fontWeight: 600, marginTop: '2px' }}>
-                  Green consolidation
-                </div>
-              </div>
-
-              <div className="nexus-card" style={{ borderLeft: '4px solid #D97706' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-                  Vehicle Capacity Utilization
-                </div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#D97706', marginTop: '4px' }}>
-                  95.0%
-                </div>
-                <div style={{ fontSize: '0.76rem', color: 'var(--color-crop)', fontWeight: 600, marginTop: '2px' }}>
-                  950 kg / 1,000 kg capacity
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Traditional vs annDhana Architecture Diagram Card */}
-          <div className="nexus-card">
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '0 0 16px 0' }}>
-              Traditional Uncoordinated Logistics vs annDhana Shared Platform
-            </h3>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-              {/* Traditional Box */}
-              <div style={{ background: '#FEF2F2', border: '1.5px solid #F87171', borderRadius: 'var(--radius-md)', padding: '18px' }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#DC2626', marginBottom: '8px' }}>
-                  ❌ Traditional Uncoordinated System
-                </div>
-                <ul style={{ fontSize: '0.82rem', color: '#7F1D1D', lineHeight: 1.6, paddingLeft: '18px', margin: 0 }}>
-                  <li><strong>3 separate vehicles</strong> dispatched for 3 farmers.</li>
-                  <li>Vehicle 1 ➔ Farmer A (300kg) ➔ Buyer: 46.2 km (₹1,108)</li>
-                  <li>Vehicle 2 ➔ Farmer B (250kg) ➔ Buyer: 48.4 km (₹1,161)</li>
-                  <li>Vehicle 3 ➔ Farmer C (400kg) ➔ Buyer: 44.0 km (₹1,056)</li>
-                  <li><strong>Total Distance:</strong> 138.6 km</li>
-                  <li><strong>Total Freight Cost:</strong> ₹3,325</li>
-                  <li>Each vehicle runs 70% empty on return trips.</li>
-                </ul>
-              </div>
-
-              {/* annDhana Shared Box */}
-              <div style={{ background: '#F0FDF4', border: '1.5px solid #4ADE80', borderRadius: 'var(--radius-md)', padding: '18px' }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>
-                  ⭐ annDhana AI Shared Logistics System
-                </div>
-                <ul style={{ fontSize: '0.82rem', color: '#14532D', lineHeight: 1.6, paddingLeft: '18px', margin: 0 }}>
-                  <li><strong>1 single shared vehicle</strong> (Tata Ace 1,000 kg).</li>
-                  <li>Route: Depot ➔ Farmer A ➔ Farmer C ➔ Farmer B ➔ Restaurant ➔ Retail Store</li>
-                  <li><strong>Total Load:</strong> 950 kg (95% full capacity utilization).</li>
-                  <li><strong>Total Distance:</strong> Only 42.6 km.</li>
-                  <li><strong>Total Operating Cost:</strong> ₹1,022 (Saves ₹2,303!).</li>
-                  <li><strong>Partner Earns:</strong> ₹2,500 guaranteed fair payout.</li>
-                  <li><strong>Carbon Reduction:</strong> 25.9 kg CO₂ saved.</li>
-                </ul>
-              </div>
-            </div>
           </div>
         </div>
       )}

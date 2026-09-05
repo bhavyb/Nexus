@@ -12,7 +12,10 @@ import {
   Send,
   Sparkles,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  KeyRound,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext.jsx';
 
@@ -34,6 +37,12 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [customLocations, setCustomLocations] = useState({});
+
+  // Two-Sided OTP Verification Modal State
+  const [otpModal, setOtpModal] = useState(null); // { type: 'pickup' | 'delivery', delivery: ... }
+  const [inputOtp, setInputOtp] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
 
   const load = async () => {
     try {
@@ -124,6 +133,36 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
       setError(err.message);
     } finally {
       setUpdating('');
+    }
+  };
+
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    if (!otpModal || !inputOtp.trim()) return;
+    setVerifyingOtp(true);
+    setOtpError('');
+    const endpoint = otpModal.type === 'pickup'
+      ? `/api/deliveries/${otpModal.delivery.reference}/verify-pickup`
+      : `/api/deliveries/${otpModal.delivery.reference}/verify-delivery`;
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp: inputOtp.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Verification failed. Please check the 4-digit OTP.');
+      }
+      setDeliveries((current) =>
+        current.map((item) => (item.reference === otpModal.delivery.reference ? data.delivery : item))
+      );
+      setOtpModal(null);
+      setInputOtp('');
+    } catch (err) {
+      setOtpError(err.message);
+    } finally {
+      setVerifyingOtp(false);
     }
   };
 
@@ -343,15 +382,146 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
                 })}
               </div>
 
-              {/* Logistics Actions: Status advancement + Location update */}
+              {/* FARMER SECURE PICKUP OTP BOX */}
+              {role === 'farmer' && delivery.pickup_otp && (
+                <div
+                  style={{
+                    background: '#ECFDF5',
+                    border: '1.5px dashed #059669',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ background: '#059669', color: 'white', padding: '6px', borderRadius: '8px', display: 'flex' }}>
+                      <KeyRound size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#047857', textTransform: 'uppercase' }}>
+                        Farmgate Pickup Verification OTP
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#065F46', marginTop: '1px' }}>
+                        Share this 4-digit code <strong>ONLY</strong> with the logistics carrier upon collection at your farmgate.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div
+                      style={{
+                        fontSize: '1.4rem',
+                        fontWeight: 900,
+                        letterSpacing: '4px',
+                        color: '#047857',
+                        background: 'white',
+                        padding: '4px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #A7F3D0',
+                        fontFamily: 'monospace',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                      }}
+                    >
+                      {delivery.pickup_otp}
+                    </div>
+                    {delivery.pickup_verified_at && (
+                      <span style={{ fontSize: '0.7rem', color: 'var(--color-crop)', fontWeight: 700 }}>
+                        ✓ Verified by Driver
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* BUYER SECURE DELIVERY OTP BOX */}
+              {role === 'customer' && delivery.delivery_otp && (
+                <div
+                  style={{
+                    background: '#EFF6FF',
+                    border: '1.5px dashed #2563EB',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ background: '#2563EB', color: 'white', padding: '6px', borderRadius: '8px', display: 'flex' }}>
+                      <KeyRound size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1E40AF', textTransform: 'uppercase' }}>
+                        Doorstep Delivery Verification OTP
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#1E3A8A', marginTop: '1px' }}>
+                        Share this 4-digit code with the logistics driver <strong>ONLY</strong> after inspecting & receiving your produce.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div
+                      style={{
+                        fontSize: '1.4rem',
+                        fontWeight: 900,
+                        letterSpacing: '4px',
+                        color: '#1E40AF',
+                        background: 'white',
+                        padding: '4px 16px',
+                        borderRadius: '8px',
+                        border: '1px solid #BFDBFE',
+                        fontFamily: 'monospace',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                      }}
+                    >
+                      {delivery.delivery_otp}
+                    </div>
+                    {delivery.delivery_verified_at && (
+                      <span style={{ fontSize: '0.7rem', color: '#2563EB', fontWeight: 700 }}>
+                        ✓ Verified by Driver
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Checkpoints info banner for non-drivers */}
+              {!isLogistics && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.73rem', color: 'var(--color-text-secondary)', padding: '2px 0' }}>
+                  <ShieldCheck size={14} color="var(--color-crop)" />
+                  <span>Checkpoints and milestones are strictly verified and published by the assigned logistics driver.</span>
+                </div>
+              )}
+
+              {/* Logistics Actions: Driver Exclusive Checkpoints & Two-Sided OTP Verification */}
               {isLogistics && (
                 <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                    <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-                      Logistics Control Panel: Publish Live Progress
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--color-soil-dark)', textTransform: 'uppercase' }}>
+                        Driver Operations & Verification Controls
+                      </span>
+                      {delivery.demo_pickup_otp && delivery.status === 'Accepted' && (
+                        <span style={{ fontSize: '0.7rem', color: '#6B7280', background: '#F3F4F6', padding: '2px 6px', borderRadius: '4px' }}>
+                          (Farmer OTP: <strong>{delivery.demo_pickup_otp}</strong>)
+                        </span>
+                      )}
+                      {delivery.demo_delivery_otp && delivery.status === 'In Transit' && (
+                        <span style={{ fontSize: '0.7rem', color: '#6B7280', background: '#F3F4F6', padding: '2px 6px', borderRadius: '4px' }}>
+                          (Buyer OTP: <strong>{delivery.demo_delivery_otp}</strong>)
+                        </span>
+                      )}
+                    </div>
 
                     <div style={{ display: 'flex', gap: '8px' }}>
+                      {/* Step 1: Claim/Accept */}
                       {delivery.status === 'Assigned' && (
                         <button
                           className="btn-primary"
@@ -363,24 +533,61 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
                         </button>
                       )}
 
-                      {delivery.status !== 'Assigned' && currentIndex < statuses.length - 1 && (
+                      {/* Step 2: Farmer Pickup Verification (Requires Farmer's OTP) */}
+                      {delivery.status === 'Accepted' && (
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            setOtpModal({ type: 'pickup', delivery });
+                            setInputOtp('');
+                            setOtpError('');
+                          }}
+                          style={{ fontSize: '0.78rem', padding: '6px 14px', fontWeight: 800, background: '#059669', borderColor: '#059669', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <KeyRound size={14} /> Verify Farmer Pickup (Enter OTP)
+                        </button>
+                      )}
+
+                      {/* Step 3: Produce Loaded -> Depart Farm */}
+                      {delivery.status === 'Picked Up' && (
                         <button
                           className="btn-primary"
                           disabled={updating === delivery.reference}
-                          onClick={() => updateStatus(delivery, statuses[currentIndex + 1])}
-                          style={{ fontSize: '0.78rem', padding: '6px 14px', fontWeight: 800, background: '#7C3AED', borderColor: '#7C3AED' }}
+                          onClick={() => updateStatus(delivery, 'In Transit')}
+                          style={{ fontSize: '0.78rem', padding: '6px 14px', fontWeight: 800, background: '#7C3AED', borderColor: '#7C3AED', display: 'flex', alignItems: 'center', gap: '6px' }}
                         >
-                          {updating === delivery.reference ? 'Publishing...' : `Mark as ${statuses[currentIndex + 1]}`}
+                          <Truck size={14} /> Depart Farm & Mark In Transit
                         </button>
+                      )}
+
+                      {/* Step 4: Buyer Delivery Verification (Requires Customer's OTP) */}
+                      {delivery.status === 'In Transit' && (
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            setOtpModal({ type: 'delivery', delivery });
+                            setInputOtp('');
+                            setOtpError('');
+                          }}
+                          style={{ fontSize: '0.78rem', padding: '6px 14px', fontWeight: 800, background: '#2563EB', borderColor: '#2563EB', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <KeyRound size={14} /> Verify Buyer Delivery (Enter OTP)
+                        </button>
+                      )}
+
+                      {delivery.status === 'Delivered' && (
+                        <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--color-crop)', background: '#E8F5E9', padding: '4px 12px', borderRadius: '6px' }}>
+                          ✓ Delivered & Fully Verified
+                        </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Location Quick Presets & Custom Input */}
+                  {/* Driver Checkpoint Publisher (Only driver can update checkpoint locations) */}
                   {delivery.status !== 'Assigned' && !isDelivered && (
                     <div style={{ background: '#F8FAFC', padding: '10px 14px', borderRadius: '6px', border: '1px solid #E2E8F0' }}>
-                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-soil-dark)', marginBottom: '6px' }}>
-                        {t('quickPostLocation')}
+                      <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--color-soil-dark)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Navigation size={13} color="#7C3AED" /> Driver Checkpoint Publisher:
                       </div>
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
                         {LOCATION_PRESETS.map((preset) => (
@@ -407,7 +614,7 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <input
                           type="text"
-                          placeholder="Or type custom landmark (e.g. Near Sanand Toll Plaza, moving at 45 km/h)..."
+                          placeholder="Or post custom landmark (e.g. Near Sanand Toll Plaza, moving at 45 km/h)..."
                           value={customLocations[delivery.reference] || ''}
                           onChange={(e) => setCustomLocations({ ...customLocations, [delivery.reference]: e.target.value })}
                           style={{
@@ -425,7 +632,7 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
                           disabled={updating === delivery.reference || !customLocations[delivery.reference]}
                           style={{ fontSize: '0.75rem', padding: '6px 12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}
                         >
-                          <Send size={12} /> Post Update
+                          <Send size={12} /> Post Checkpoint
                         </button>
                       </div>
                     </div>
@@ -435,6 +642,133 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
             </div>
           );
         })
+      )}
+
+      {/* Driver OTP Verification Modal */}
+      {otpModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.55)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px'
+          }}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: '16px',
+              padding: '28px',
+              maxWidth: '440px',
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+              position: 'relative',
+              border: '1px solid var(--color-border)'
+            }}
+          >
+            <button
+              onClick={() => { setOtpModal(null); setOtpError(''); }}
+              style={{ position: 'absolute', right: '16px', top: '16px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+            >
+              <X size={20} />
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+              <div
+                style={{
+                  background: otpModal.type === 'pickup' ? '#ECFDF5' : '#EFF6FF',
+                  color: otpModal.type === 'pickup' ? '#059669' : '#2563EB',
+                  padding: '10px',
+                  borderRadius: '12px'
+                }}
+              >
+                <KeyRound size={24} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                  {otpModal.type === 'pickup' ? 'Verify Farmer Farmgate Pickup' : 'Verify Customer Doorstep Delivery'}
+                </h3>
+                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                  Reference: <strong>{otpModal.delivery.reference}</strong>
+                </div>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.84rem', color: 'var(--color-text-secondary)', lineHeight: 1.45, margin: '0 0 16px 0' }}>
+              {otpModal.type === 'pickup'
+                ? `Ask Farmer "${otpModal.delivery.farmer_name}" for their 4-digit Pickup OTP upon inspecting and loading the ${otpModal.delivery.quantity_kg} kg ${otpModal.delivery.crop}.`
+                : `Ask Customer "${otpModal.delivery.buyer_name}" for their 4-digit Delivery OTP upon handing over the ${otpModal.delivery.quantity_kg} kg ${otpModal.delivery.crop}.`}
+            </p>
+
+            {otpError && (
+              <div className="nexus-alert danger" style={{ marginBottom: '14px', fontSize: '0.8rem', padding: '8px 12px' }}>
+                <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                <span>{otpError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyOtp} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--color-soil-dark)', marginBottom: '6px' }}>
+                  Enter 4-Digit {otpModal.type === 'pickup' ? 'Farmer Pickup' : 'Customer Delivery'} OTP:
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="• • • •"
+                  value={inputOtp}
+                  onChange={(e) => setInputOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                  autoFocus
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '1.6rem',
+                    fontWeight: 900,
+                    letterSpacing: '8px',
+                    textAlign: 'center',
+                    fontFamily: 'monospace',
+                    borderRadius: '8px',
+                    border: '2px solid #7C3AED',
+                    background: '#FAF5FF',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => { setOtpModal(null); setOtpError(''); }}
+                  style={{ flex: 1, padding: '10px', fontSize: '0.84rem' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={verifyingOtp || inputOtp.length < 4}
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    fontSize: '0.84rem',
+                    background: otpModal.type === 'pickup' ? '#059669' : '#2563EB',
+                    borderColor: otpModal.type === 'pickup' ? '#059669' : '#2563EB',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {verifyingOtp ? 'Verifying OTP...' : 'Submit & Confirm'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </section>
   );

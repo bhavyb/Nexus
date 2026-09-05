@@ -59,6 +59,21 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
   // Bulk demands state
   const [bulkDemands, setBulkDemands] = useState([]);
   const [loadingBulk, setLoadingBulk] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkFormData, setBulkFormData] = useState({
+    buyer_name: user?.name || '',
+    buyer_type: 'Restaurant',
+    phone: user?.phone || '+91 98251 44332',
+    crop: commodities[0] || 'Tomato',
+    quantity_needed_kg: 500,
+    max_budget_kg: 28.0,
+    location: user?.location || 'Navrangpura, Ahmedabad (Gujarat)',
+    required_by_date: 'Within 48 hours',
+    notes: 'Direct farmgate sourcing. Consistent fresh harvest required.'
+  });
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkSuccess, setBulkSuccess] = useState(null);
+  const [bulkError, setBulkError] = useState(null);
 
   // Community pools state
   const [communityPools, setCommunityPools] = useState([]);
@@ -191,6 +206,56 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
       setOrderError('Cannot connect to annDhana logistics backend');
     } finally {
       setOrderSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.name) {
+      setBulkFormData((prev) => ({
+        ...prev,
+        buyer_name: user.name,
+        phone: user.phone || prev.phone,
+        location: user.location || prev.location
+      }));
+    }
+  }, [user]);
+
+  const handleCreateBulkDemand = async (e) => {
+    e.preventDefault();
+    setBulkSubmitting(true);
+    setBulkError(null);
+    setBulkSuccess(null);
+    try {
+      const res = await fetch('/api/bulk-demands', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          buyer_name: bulkFormData.buyer_name,
+          buyer_type: bulkFormData.buyer_type,
+          phone: bulkFormData.phone,
+          crop: bulkFormData.crop,
+          quantity_needed_kg: parseFloat(bulkFormData.quantity_needed_kg),
+          max_budget_kg: parseFloat(bulkFormData.max_budget_kg),
+          location: bulkFormData.location,
+          required_by_date: bulkFormData.required_by_date,
+          notes: bulkFormData.notes
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBulkSuccess('Institutional bulk requisition posted successfully! Verified farmers can now supply your requirement.');
+        fetchBulkDemands();
+        setTimeout(() => {
+          setShowBulkModal(false);
+          setBulkSuccess(null);
+        }, 1800);
+      } else {
+        setBulkError(data.error || 'Failed to post bulk requisition.');
+      }
+    } catch (err) {
+      setBulkError(err.message || 'Error creating bulk requisition.');
+    } finally {
+      setBulkSubmitting(false);
     }
   };
 
@@ -589,9 +654,30 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
               </div>
             </div>
 
-            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#2563EB', background: 'white', padding: '6px 14px', borderRadius: '20px', border: '1px solid #BFDBFE' }}>
-              {bulkDemands.length} Open Requisitions
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setBulkError(null);
+                  setBulkSuccess(null);
+                  setShowBulkModal(true);
+                }}
+                style={{
+                  background: '#2563EB',
+                  borderColor: '#2563EB',
+                  padding: '7px 14px',
+                  fontSize: '0.82rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <PlusCircle size={15} /> + Post Bulk Requisition
+              </button>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#2563EB', background: 'white', padding: '6px 14px', borderRadius: '20px', border: '1px solid #BFDBFE' }}>
+                {bulkDemands.length} Open Requisitions
+              </span>
+            </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
@@ -665,25 +751,47 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                 </div>
 
                 <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '10px' }}>
-                  <a
-                    href={`https://wa.me/${b.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                      `Namaste ${b.buyer_name}, I am a farmer on annDhana and I can fulfill your requirement of ${b.quantity_needed_kg} kg ${b.crop}.`
-                    )}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-primary"
-                    style={{
-                      width: '100%',
-                      justifyContent: 'center',
-                      padding: '8px',
-                      fontSize: '0.78rem',
-                      background: '#2563EB',
-                      borderColor: '#2563EB',
-                      textDecoration: 'none'
-                    }}
-                  >
-                    <CheckCircle2 size={14} /> Accept & Supply Bulk Order
-                  </a>
+                  {user?.role === 'customer' ? (
+                    <div
+                      style={{
+                        padding: '9px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: '#F8FAFC',
+                        border: '1px dashed #94A3B8',
+                        color: '#475569',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        textAlign: 'center',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <ShieldCheck size={14} color="#64748B" />
+                      Only verified Farmers & FPOs can accept & supply bulk orders
+                    </div>
+                  ) : (
+                    <a
+                      href={`https://wa.me/${b.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                        `Namaste ${b.buyer_name}, I am a farmer on annDhana and I can fulfill your requirement of ${b.quantity_needed_kg} kg ${b.crop}.`
+                      )}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn-primary"
+                      style={{
+                        width: '100%',
+                        justifyContent: 'center',
+                        padding: '8px',
+                        fontSize: '0.78rem',
+                        background: '#2563EB',
+                        borderColor: '#2563EB',
+                        textDecoration: 'none'
+                      }}
+                    >
+                      <CheckCircle2 size={14} /> Accept & Supply Bulk Order
+                    </a>
+                  )}
                 </div>
               </div>
             ))}
@@ -1058,6 +1166,187 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                   </button>
                   <button type="submit" className="btn-primary" disabled={orderSubmitting} style={{ padding: '8px 18px', gap: '6px' }}>
                     <Truck size={15} /> {orderSubmitting ? 'Booking Delivery...' : 'Confirm Order & Dispatch Logistics'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* BUYER POST BULK REQUISITION MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {showBulkModal && (
+        <div className="nexus-modal-overlay">
+          <div className="nexus-modal" style={{ maxWidth: '580px' }}>
+            <div className="nexus-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Building2 size={20} color="#2563EB" />
+                <h3 className="nexus-modal-title">Post Institutional Bulk Requisition</h3>
+              </div>
+              <button
+                className="nexus-modal-close"
+                onClick={() => setShowBulkModal(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {bulkSuccess ? (
+              <div style={{ padding: '24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+                <CheckCircle2 size={48} color="var(--color-crop)" />
+                <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-crop)', margin: 0 }}>
+                  Requisition Posted Successfully!
+                </h4>
+                <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', maxWidth: '420px', margin: 0 }}>
+                  {bulkSuccess}
+                </p>
+              </div>
+            ) : (
+              <form onSubmit={handleCreateBulkDemand} style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {bulkError && (
+                  <div style={{ padding: '10px 14px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '8px', color: '#DC2626', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <AlertCircle size={16} />
+                    {bulkError}
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Buyer / Entity Name *</label>
+                    <input
+                      type="text"
+                      className="nexus-input"
+                      required
+                      placeholder="e.g. Grand Heritage Hotel"
+                      value={bulkFormData.buyer_name}
+                      onChange={(e) => setBulkFormData({ ...bulkFormData, buyer_name: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Buyer Category *</label>
+                    <select
+                      className="nexus-select"
+                      value={bulkFormData.buyer_type}
+                      onChange={(e) => setBulkFormData({ ...bulkFormData, buyer_type: e.target.value })}
+                    >
+                      <option value="Hotel">Hotel</option>
+                      <option value="Restaurant">Restaurant</option>
+                      <option value="Hostel / Mess">Hostel / Mess</option>
+                      <option value="Supermarket">Supermarket</option>
+                      <option value="Caterer">Caterer</option>
+                      <option value="Wholesale Buyer">Wholesale Buyer</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Contact Phone / WhatsApp *</label>
+                    <input
+                      type="tel"
+                      className="nexus-input"
+                      required
+                      placeholder="+91 98251 XXXXX"
+                      value={bulkFormData.phone}
+                      onChange={(e) => setBulkFormData({ ...bulkFormData, phone: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Crop Commodity *</label>
+                    <select
+                      className="nexus-select"
+                      value={bulkFormData.crop}
+                      onChange={(e) => setBulkFormData({ ...bulkFormData, crop: e.target.value })}
+                    >
+                      {commodities.map((c) => (
+                        <option key={c} value={c}>
+                          {getCropDisplayName(c)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Required Quantity (kg) *</label>
+                    <input
+                      type="number"
+                      className="nexus-input"
+                      required
+                      min="50"
+                      step="25"
+                      value={bulkFormData.quantity_needed_kg}
+                      onChange={(e) => setBulkFormData({ ...bulkFormData, quantity_needed_kg: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Max Budget (₹/kg) *</label>
+                    <input
+                      type="number"
+                      className="nexus-input"
+                      required
+                      min="1"
+                      step="0.5"
+                      value={bulkFormData.max_budget_kg}
+                      onChange={(e) => setBulkFormData({ ...bulkFormData, max_budget_kg: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Delivery Location / City *</label>
+                    <input
+                      type="text"
+                      className="nexus-input"
+                      required
+                      placeholder="e.g. Navrangpura, Ahmedabad"
+                      value={bulkFormData.location}
+                      onChange={(e) => setBulkFormData({ ...bulkFormData, location: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Required By *</label>
+                    <input
+                      type="text"
+                      className="nexus-input"
+                      required
+                      placeholder="e.g. Within 24 hours, Tomorrow morning"
+                      value={bulkFormData.required_by_date}
+                      onChange={(e) => setBulkFormData({ ...bulkFormData, required_by_date: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Special Quality / Sourcing Instructions</label>
+                  <textarea
+                    className="nexus-input"
+                    rows="2"
+                    placeholder="e.g. Grade A ripe farmgate produce required, daily recurring delivery preferred"
+                    value={bulkFormData.notes}
+                    onChange={(e) => setBulkFormData({ ...bulkFormData, notes: e.target.value })}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                  <button type="button" className="btn-secondary" onClick={() => setShowBulkModal(false)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={bulkSubmitting}
+                    style={{ background: '#2563EB', borderColor: '#2563EB', padding: '8px 18px', gap: '6px' }}
+                  >
+                    <CheckCircle2 size={15} /> {bulkSubmitting ? 'Posting...' : 'Publish Bulk Requisition'}
                   </button>
                 </div>
               </form>

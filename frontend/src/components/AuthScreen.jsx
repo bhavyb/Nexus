@@ -54,7 +54,7 @@ export default function AuthScreen({ onAuthenticated }) {
         <h1 style={{ fontSize: 'clamp(2rem, 3.8vw, 3rem)', lineHeight: 1.1, margin: '8px 0 14px 0', color: 'var(--palette-forest)', fontWeight: 800 }}>
           One clear dashboard for every hand in the supply chain.
         </h1>
-        
+
         <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.96rem', marginBottom: '18px', lineHeight: 1.5 }}>
           Connect farms, buyers and reliable transport with fair prices, demand intelligence and transparent delivery.
         </p>
@@ -152,12 +152,12 @@ export default function AuthScreen({ onAuthenticated }) {
           <p>{mode === 'login' ? 'Sign in to your stakeholder workspace.' : 'Choose your role to get a workspace built for you.'}</p>
         </div>
         <div className="role-picker">
-            <p className="input-label">{mode === 'login' ? 'Sign in as' : 'I am a'}</p>
-            {roles.map((item) => (
-              <button key={item.id} type="button" className={role === item.id ? 'selected' : ''} onClick={() => setRole(item.id)}>
-                <strong>{item.label}</strong><small>{item.description}</small>
-              </button>
-            ))}
+          <p className="input-label">{mode === 'login' ? 'Sign in as' : 'I am a'}</p>
+          {roles.map((item) => (
+            <button key={item.id} type="button" className={role === item.id ? 'selected' : ''} onClick={() => setRole(item.id)}>
+              <strong>{item.label}</strong><small>{item.description}</small>
+            </button>
+          ))}
         </div>
         <form onSubmit={submit}>
           {mode === 'register' && <label className="input-group"><span className="input-label">Full name</span><input className="nexus-input" required value={form.name} onChange={update('name')} placeholder="Your name or FPO lead" /></label>}

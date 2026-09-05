@@ -6,7 +6,6 @@ import MarketplaceModule from './components/MarketplaceModule.jsx';
 import DemandForecastHeatmap from './components/DemandForecastHeatmap.jsx';
 import SmartMatchingModule from './components/SmartMatchingModule.jsx';
 import LogisticsOptimizerModule from './components/LogisticsOptimizerModule.jsx';
-import FoodWasteModule from './components/FoodWasteModule.jsx';
 
 // Core Analytical Engines
 import FairPriceModule from './components/FairPriceModule.jsx';
@@ -138,11 +137,6 @@ function AppContent() {
       id: 'logistics',
       label: t('tabLogistics'),
       icon: <Truck size={15} />
-    },
-    {
-      id: 'food-waste',
-      label: t('tabFoodWaste'),
-      icon: <Flame size={15} />
     }
   ].filter((tab) => {
     if (tab.id === 'overview') return false;
@@ -151,7 +145,6 @@ function AppContent() {
     if (tab.id === 'logistics') return user?.role === 'logistics';
     if (tab.id === 'demand-forecast') return user?.role === 'farmer';
     if (tab.id === 'smart-match') return user?.role === 'customer' || user?.role === 'farmer';
-    if (tab.id === 'food-waste') return user?.role === 'farmer';
     return tab.id === 'dashboard';
   });
 
@@ -317,17 +310,13 @@ function AppContent() {
                 commodities={commodities}
                 locationsData={locationsData}
                 onNavigateToLogistics={() => setActiveTab('logistics')}
+                user={user}
               />
             )}
 
             {/* 6. Shared Logistics & Route Optimizer */}
             {activeTab === 'logistics' && (
               <LogisticsOptimizerModule />
-            )}
-
-            {/* 7. Food Waste Prevention Engine */}
-            {activeTab === 'food-waste' && (
-              <FoodWasteModule />
             )}
 
             {/* Deep Analytical Tools */}
