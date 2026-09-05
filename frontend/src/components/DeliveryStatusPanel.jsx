@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   UserCheck
 } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 const statuses = ['Assigned', 'Accepted', 'Picked Up', 'In Transit', 'Delivered'];
 
@@ -26,6 +27,7 @@ const LOCATION_PRESETS = [
 ];
 
 export default function DeliveryStatusPanel({ role, stakeholder }) {
+  const { t } = useLanguage();
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState('');
@@ -155,10 +157,10 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
           <div>
             <h2 className="card-title" style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0 }}>
               {role === 'customer'
-                ? 'My Purchases & Live Tracking (મારા ઓર્ડર્સ અને લાઈવ ટ્રેકિંગ)'
+                ? t('myPurchasesTitle')
                 : role === 'farmer'
-                ? 'My Farmgate Orders & Pickups (મારા ખેતરના ઓર્ડર્સ અને લાઈવ ટ્રેકિંગ)'
-                : 'Logistics Delivery Operations & Live Tracking'}
+                ? t('myFarmgateOrdersTitle')
+                : t('logisticsOpsTitle')}
             </h2>
             <p className="card-subtitle" style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '2px 0 0 0' }}>
               {role === 'customer'
@@ -378,7 +380,7 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
                   {delivery.status !== 'Assigned' && !isDelivered && (
                     <div style={{ background: '#F8FAFC', padding: '10px 14px', borderRadius: '6px', border: '1px solid #E2E8F0' }}>
                       <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-soil-dark)', marginBottom: '6px' }}>
-                        Quick-Post Live Checkpoint Location ("Logistics ક્યાં છે"):
+                        {t('quickPostLocation')}
                       </div>
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
                         {LOCATION_PRESETS.map((preset) => (

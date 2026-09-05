@@ -269,7 +269,7 @@ export default function LogisticsOptimizerModule() {
               Intelligent Multi-Criteria Vehicle Selection Engine
             </div>
             <h3 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '4px 0 8px 0' }}>
-              How Nexus AI Selects the Optimal Logistics Partner
+              How annDhana AI Selects the Optimal Logistics Partner
             </h3>
             <div
               style={{
@@ -497,10 +497,10 @@ export default function LogisticsOptimizerModule() {
             </div>
           )}
 
-          {/* Traditional vs Nexus Architecture Diagram Card */}
+          {/* Traditional vs annDhana Architecture Diagram Card */}
           <div className="nexus-card">
             <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '0 0 16px 0' }}>
-              Traditional Uncoordinated Logistics vs Nexus Shared Platform
+              Traditional Uncoordinated Logistics vs annDhana Shared Platform
             </h3>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
@@ -520,10 +520,10 @@ export default function LogisticsOptimizerModule() {
                 </ul>
               </div>
 
-              {/* Nexus Shared Box */}
+              {/* annDhana Shared Box */}
               <div style={{ background: '#F0FDF4', border: '1.5px solid #4ADE80', borderRadius: 'var(--radius-md)', padding: '18px' }}>
                 <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#166534', marginBottom: '8px' }}>
-                  ⭐ Nexus AI Shared Logistics System
+                  ⭐ annDhana AI Shared Logistics System
                 </div>
                 <ul style={{ fontSize: '0.82rem', color: '#14532D', lineHeight: 1.6, paddingLeft: '18px', margin: 0 }}>
                   <li><strong>1 single shared vehicle</strong> (Tata Ace 1,000 kg).</li>

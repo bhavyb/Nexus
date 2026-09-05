@@ -136,7 +136,7 @@ export default function SmartMatchingModule({ commodities = [], locationsData = 
             Smart Harvest-to-Buyer Multi-Allocation
           </h2>
           <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-            Instead of waiting passively for a buyer, Nexus AI instantly splits harvest lots across hotels, restaurants, supermarkets, and community pools.
+            Instead of waiting passively for a buyer, annDhana AI instantly splits harvest lots across hotels, restaurants, supermarkets, and community pools.
           </div>
         </div>
 

@@ -24,8 +24,10 @@ import { getCropDisplayName, getCropGujaratiOnly } from '../utils/cropTranslatio
 import { getCropImage } from '../utils/cropImages';
 import TraceabilityModal from './TraceabilityModal.jsx';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 export default function FarmerHub({ user, commodities = [], locationsData = { states: [], districts: [], markets: [] } }) {
+  const { t } = useLanguage();
   const [activeFarmerTab, setActiveFarmerTab] = useState('orders'); // 'orders', 'produce'
   const [listingsFilter, setListingsFilter] = useState('my'); // 'my', 'all'
   const [listings, setListings] = useState([]);
@@ -381,7 +383,7 @@ export default function FarmerHub({ user, commodities = [], locationsData = { st
             gap: '8px'
           }}
         >
-          <Truck size={17} color="var(--color-crop)" /> 📦 Incoming Orders & Logistics (મને મળેલા ઓર્ડર્સ)
+          <Truck size={17} color="var(--color-crop)" /> 📦 {t('incomingOrdersTab')}
         </button>
 
         <button
@@ -422,7 +424,7 @@ export default function FarmerHub({ user, commodities = [], locationsData = { st
                 Registered Harvests & Active Supply Lots
               </h3>
               <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                Live inventory connected to the Nexus Buyer Matching & Shared Logistics Engine
+                Live inventory connected to the annDhana Buyer Matching & Shared Logistics Engine
               </div>
             </div>
 
@@ -602,7 +604,7 @@ export default function FarmerHub({ user, commodities = [], locationsData = { st
 
                         <a
                           href={`https://wa.me/${(item.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                            `Namaste ${item.farmer_name}, I saw your ${item.crop} listing on Nexus.`
+                            `Namaste ${item.farmer_name}, I saw your ${item.crop} listing on annDhana.`
                           )}`}
                           target="_blank"
                           rel="noreferrer"

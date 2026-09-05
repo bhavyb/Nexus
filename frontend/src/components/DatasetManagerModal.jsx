@@ -220,7 +220,7 @@ export default function DatasetManagerModal({ isOpen, onClose, statusData, onDat
             <div>
               <h2 className="dataset-modal-title">Live Agmarknet Dataset Manager</h2>
               <p className="dataset-modal-subtitle">
-                સત્તાવાર સરકારી મંડી ભાવ ડેટાસેટ નિયંત્રણ (Live Data Sync & Ingestion)
+                Official Government Mandi Price Dataset Management (Live Data Sync & Ingestion)
               </p>
             </div>
           </div>

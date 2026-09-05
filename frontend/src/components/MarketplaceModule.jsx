@@ -30,8 +30,10 @@ import { getCropDisplayName, getCropGujaratiOnly } from '../utils/cropTranslatio
 import { getCropImage } from '../utils/cropImages';
 import TraceabilityModal from './TraceabilityModal.jsx';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 export default function MarketplaceModule({ user, commodities = [], locationsData = { states: [], districts: [], markets: [] } }) {
+  const { t } = useLanguage();
   const [marketSubTab, setMarketSubTab] = useState('direct'); // 'direct', 'bulk', 'community', 'deliveries'
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -186,7 +188,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
         setOrderError(data.error || 'Failed to create delivery order');
       }
     } catch (err) {
-      setOrderError('Cannot connect to Nexus logistics backend');
+      setOrderError('Cannot connect to annDhana logistics backend');
     } finally {
       setOrderSubmitting(false);
     }
@@ -358,7 +360,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                 onChange={(e) => setFilterCrop(e.target.value)}
                 style={{ padding: '6px 12px', fontSize: '0.85rem' }}
               >
-                <option value="">All Crops (सभी फसलें)</option>
+                <option value="">{t('allCrops', 'All Crops')}</option>
                 {commodities.map((c) => (
                   <option key={c} value={c}>
                     {getCropDisplayName(c)}
@@ -400,7 +402,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
               {listings.map((l) => {
                 const cleanPhone = l.phone.replace(/[^0-9]/g, '');
                 const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(
-                  `Namaste ${l.farmer_name}, I saw your ${l.crop} listing on Nexus.`
+                  `Namaste ${l.farmer_name}, I saw your ${l.crop} listing on annDhana.`
                 )}`;
                 const isPre = l.is_pre_harvest === 1;
 
@@ -511,7 +513,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                             fontSize: '0.84rem'
                           }}
                         >
-                          <Truck size={15} /> Buy & Book Delivery (ખરીદો અને ડિલિવરી)
+                          <Truck size={15} /> {t('buyAndBookDelivery')}
                         </button>
 
                         <div style={{ display: 'flex', gap: '8px' }}>
@@ -665,7 +667,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                 <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '10px' }}>
                   <a
                     href={`https://wa.me/${b.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                      `Namaste ${b.buyer_name}, I am a farmer on Nexus and I can fulfill your requirement of ${b.quantity_needed_kg} kg ${b.crop}.`
+                      `Namaste ${b.buyer_name}, I am a farmer on annDhana and I can fulfill your requirement of ${b.quantity_needed_kg} kg ${b.crop}.`
                     )}`}
                     target="_blank"
                     rel="noreferrer"
@@ -715,7 +717,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                 Apartment & College Area Aggregated Orders
               </h3>
               <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                Instead of delivering separate 2kg bags, Nexus aggregates 50+ apartment families into 200kg bulk deliveries—slashing transport fees and securing 15-20% discounts.
+                Instead of delivering separate 2kg bags, annDhana aggregates 50+ apartment families into 200kg bulk deliveries—slashing transport fees and securing 15-20% discounts.
               </div>
             </div>
           </div>
@@ -823,7 +825,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                 </div>
                 <div>
                   <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
-                    Order Successfully Placed! (ઓર્ડર બુક થઈ ગયો)
+                    {t('orderSuccessfullyPlaced')}
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
                     Reference: <strong>{orderSuccess.reference}</strong> • Tracking active in real-time below
@@ -886,7 +888,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                     Order Confirmed & Logistics Dispatched!
                   </h4>
                   <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                    તમારો ઓર્ડર સફળતાપૂર્વક બુક થયો છે અને ડિલિવરી શરૂ થઈ ગઈ છે.
+                    {t('orderConfirmedDesc')}
                   </div>
                   <div style={{ display: 'inline-block', margin: '14px 0 6px 0', background: 'white', padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--color-border)', fontFamily: 'monospace', fontWeight: 800, fontSize: '1.05rem', color: 'var(--color-crop)' }}>
                     {orderSuccess.reference}
@@ -912,7 +914,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
                     }}
                     style={{ flex: 2, padding: '10px', justifyContent: 'center', gap: '6px' }}
                   >
-                    <Truck size={16} /> Track Live Delivery (લાઈવ ટ્રેકિંગ જુઓ)
+                    <Truck size={16} /> {t('trackLiveDelivery')}
                   </button>
                 </div>
               </div>

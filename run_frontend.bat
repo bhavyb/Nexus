@@ -1,7 +1,7 @@
 @echo off
-title Nexus Frontend Dev Server
+title annDhana Frontend Dev Server
 echo ===================================================
-echo Starting Nexus React Frontend on http://localhost:5173
+echo Starting annDhana React Frontend on http://localhost:5173
 echo ===================================================
 
 set "PATH=%~dp0.tools\node;%PATH%"

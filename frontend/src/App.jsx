@@ -31,9 +31,28 @@ import {
   ChevronDown
 } from 'lucide-react';
 
+import { LanguageProvider, useLanguage } from './context/LanguageContext.jsx';
+
 export default function App() {
+  return (
+    <LanguageProvider>
+      <AppContent />
+    </LanguageProvider>
+  );
+}
+
+function AppContent() {
+  const { t } = useLanguage();
   const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('nexus_user')) || null; } catch { return null; }
+    try {
+      return (
+        JSON.parse(localStorage.getItem('anndhana_user')) ||
+        JSON.parse(localStorage.getItem('nexus_user')) ||
+        null
+      );
+    } catch {
+      return null;
+    }
   });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [statusData, setStatusData] = useState(null);
@@ -73,7 +92,7 @@ export default function App() {
     } catch (err) {
       console.error('Error connecting to backend:', err);
       setBackendError(
-        'Cannot connect to the annDhara backend server. Please verify Flask is running on port 5000.'
+        'Cannot connect to the annDhana backend server. Please verify Flask is running on port 5000.'
       );
     } finally {
       setLoadingInitial(false);
@@ -87,42 +106,42 @@ export default function App() {
   const primaryTabs = [
     {
       id: 'dashboard',
-      label: 'My Dashboard',
+      label: t('tabDashboard'),
       icon: <LayoutDashboard size={15} />
     },
     {
       id: 'overview',
-      label: 'Overview & Pitch',
+      label: t('tabOverview'),
       icon: <LayoutDashboard size={15} />
     },
     {
       id: 'farmer-hub',
-      label: 'Farmer & FPO Portal',
+      label: t('tabFarmerHub'),
       icon: <Sprout size={15} />
     },
     {
       id: 'marketplace',
-      label: 'Buyer Marketplace',
+      label: t('tabMarketplace'),
       icon: <ShoppingBag size={15} />
     },
     {
       id: 'demand-forecast',
-      label: 'Demand & Heatmap',
+      label: t('tabDemandForecast'),
       icon: <TrendingUp size={15} />
     },
     {
       id: 'smart-match',
-      label: 'AI Smart Matching',
+      label: t('tabSmartMatch'),
       icon: <Sparkles size={15} />
     },
     {
       id: 'logistics',
-      label: 'Shared Logistics',
+      label: t('tabLogistics'),
       icon: <Truck size={15} />
     },
     {
       id: 'food-waste',
-      label: 'Waste Prevention',
+      label: t('tabFoodWaste'),
       icon: <Flame size={15} />
     }
   ].filter((tab) => {
@@ -137,18 +156,20 @@ export default function App() {
   });
 
   const secondaryTools = [
-    { id: 'fair-price', label: 'Prophet Price Curve', icon: <Sparkles size={14} /> },
-    { id: 'mandi-compare', label: 'Mandi Net Profit Comparator', icon: <Compass size={14} /> },
-    { id: 'markup-anomaly', label: 'Retail Markup Anomaly Detector', icon: <AlertOctagon size={14} /> }
+    { id: 'fair-price', label: t('tabFairPrice'), icon: <Sparkles size={14} /> },
+    { id: 'mandi-compare', label: t('tabMandiCompare'), icon: <Compass size={14} /> },
+    { id: 'markup-anomaly', label: t('tabMarkupAnomaly'), icon: <AlertOctagon size={14} /> }
   ].filter((tool) => user?.role === 'farmer' ? tool.id !== 'markup-anomaly' : user?.role === 'customer' ? tool.id === 'markup-anomaly' : false);
 
   const handleAuthenticated = (authenticatedUser) => {
+    localStorage.setItem('anndhana_user', JSON.stringify(authenticatedUser));
     localStorage.setItem('nexus_user', JSON.stringify(authenticatedUser));
     setUser(authenticatedUser);
     setActiveTab('dashboard');
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('anndhana_user');
     localStorage.removeItem('nexus_user');
     setUser(null);
   };
@@ -181,7 +202,7 @@ export default function App() {
         {/* Primary Tab Navigation */}
         <nav
           className="module-tabs"
-          aria-label="annDhara Core Modules"
+          aria-label="annDhana Core Modules"
         >
           {primaryTabs.map((tab) => (
             <button
@@ -213,19 +234,19 @@ export default function App() {
           }}
         >
           <span style={{ fontWeight: 700, color: 'var(--color-soil-dark)' }}>
-            Deep Analytics & Mandi Engines:
+            {t('deepAnalyticsTitle')}
           </span>
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {secondaryTools.map((t) => (
+            {secondaryTools.map((tItem) => (
               <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
+                key={tItem.id}
+                onClick={() => setActiveTab(tItem.id)}
                 style={{
-                  background: activeTab === t.id ? 'white' : 'transparent',
-                  border: activeTab === t.id ? '1px solid var(--color-crop-border)' : '1px solid transparent',
-                  color: activeTab === t.id ? 'var(--color-crop)' : 'var(--color-text-secondary)',
-                  fontWeight: activeTab === t.id ? 800 : 600,
+                  background: activeTab === tItem.id ? 'white' : 'transparent',
+                  border: activeTab === tItem.id ? '1px solid var(--color-crop-border)' : '1px solid transparent',
+                  color: activeTab === tItem.id ? 'var(--color-crop)' : 'var(--color-text-secondary)',
+                  fontWeight: activeTab === tItem.id ? 800 : 600,
                   padding: '4px 10px',
                   borderRadius: '6px',
                   cursor: 'pointer',
@@ -235,7 +256,7 @@ export default function App() {
                   fontSize: '0.74rem'
                 }}
               >
-                {t.icon} {t.label}
+                {tItem.icon} {tItem.label}
               </button>
             ))}
           </div>
@@ -258,10 +279,10 @@ export default function App() {
               style={{ margin: '0 auto 16px auto', color: 'var(--color-crop)' }}
             />
             <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-soil-dark)' }}>
-              Connecting to annDhara Farm-to-Market Network...
+              {t('connectingMsg')}
             </h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-              Initializing demand models, regional heatmaps, and agricultural data feeds
+              {t('connectingSub')}
             </p>
           </div>
         ) : (
@@ -340,9 +361,9 @@ export default function App() {
           }}
         >
           <div>
-            <strong>annDhara</strong> • AI-Powered Demand-to-Delivery Agricultural Network
+            <strong>{t('brandTitle', 'annDhana')}</strong> • {t('footerNetwork')}
           </div>
-          <div>Transparent Farmgate-to-Fork Network</div>
+          <div>{t('footerSub')}</div>
         </footer>
       </main>
     </div>

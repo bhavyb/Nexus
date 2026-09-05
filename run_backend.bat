@@ -1,7 +1,7 @@
 @echo off
-title Nexus Flask Backend
+title annDhana Flask Backend
 echo ===================================================
-echo Starting Nexus Flask API on http://localhost:5000
+echo Starting annDhana Flask API on http://localhost:5000
 echo ===================================================
 
 cd /d "%~dp0backend"

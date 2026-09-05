@@ -247,7 +247,7 @@ def api_status():
     status = get_cache_status()
     return jsonify({
         "success": True,
-        "app": "Nexus AI Agricultural Intelligence Platform",
+        "app": "annDhana AI Agricultural Intelligence Platform",
         "version": "2.0-DemandToDelivery",
         "data": status
     })
@@ -911,7 +911,7 @@ def serve_frontend(path):
     if os.path.exists(os.path.join(DIST_DIR, "index.html")):
         return send_from_directory(DIST_DIR, "index.html")
     return jsonify({
-        "name": "Nexus Agricultural Platform API",
+        "name": "annDhana Agricultural Platform API",
         "status": "online",
         "message": "Frontend build not found. Run 'npm run build' inside frontend/"
     })
@@ -919,5 +919,5 @@ def serve_frontend(path):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    print(f"Starting Nexus Farm-to-Market Intelligence Server on http://localhost:{port}")
+    print(f"Starting annDhana Farm-to-Market Intelligence Server on http://localhost:{port}")
     app.run(host="0.0.0.0", port=port, debug=True)

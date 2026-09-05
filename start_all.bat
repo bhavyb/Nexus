@@ -1,12 +1,12 @@
 @echo off
-title Nexus Launcher
+title annDhana Launcher
 echo ===================================================
-echo Launching Nexus Full-Stack Platform...
+echo Launching annDhana Full-Stack Platform...
 echo ===================================================
 
-start "Nexus Backend API (Port 5000)" cmd /k "%~dp0run_backend.bat"
+start "annDhana Backend API (Port 5000)" cmd /k "%~dp0run_backend.bat"
 timeout /t 2 /nobreak >nul
-start "Nexus Frontend (Port 5173)" cmd /k "%~dp0run_frontend.bat"
+start "annDhana Frontend (Port 5173)" cmd /k "%~dp0run_frontend.bat"
 
 echo.
 echo Both servers launched!

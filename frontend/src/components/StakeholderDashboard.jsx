@@ -12,57 +12,60 @@ import {
   PackageCheck
 } from 'lucide-react';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
-
-const content = {
-  farmer: {
-    title: 'Farmer & FPO Producer Workspace',
-    description: 'Turn your harvest into dependable fair prices, connect with direct buyers, and eliminate distress sales.',
-    icon: Sprout,
-    badge: '🌾 Producer Command Center',
-    actions: [
-      ['farmer-hub', 'Add a harvest listing (ફસલ લિસ્ટ કરો)'],
-      ['demand-forecast', 'See demand forecast (માંગ આગાહી)']
-    ],
-    stats: [
-      ['Active listings', '12 Lots'],
-      ['Matched buyers', '8 Verified'],
-      ['Avg. price uplift', '+18.4%']
-    ]
-  },
-  customer: {
-    title: 'Buyer & Retailer Procurement Workspace',
-    description: 'Source fresh farmgate produce directly, lock pre-harvest supply, and plan bulk orders with confidence.',
-    icon: ShoppingBag,
-    badge: '🛒 Buyer Direct Hub',
-    actions: [
-      ['marketplace', 'Browse fresh produce (તાજી ફસલ જુઓ)'],
-      ['smart-match', 'Match a requirement (સ્માર્ટ મેચિંગ)']
-    ],
-    stats: [
-      ['Available listings', '68 Lots'],
-      ['Nearby farms', '24 Farms'],
-      ['Avg. procurement savings', '21.5%']
-    ]
-  },
-  logistics: {
-    title: 'Logistics Fleet & Dispatch Workspace',
-    description: 'Keep vehicles moving efficiently with shared multi-farm routes, live tracking, and guaranteed earnings.',
-    icon: Truck,
-    badge: '🚚 Fleet & Route Grid',
-    actions: [
-      ['logistics', 'Manage delivery routes (ડિલિવરી રૂટ જુઓ)'],
-      ['logistics', 'Review delivery assignments (ઓર્ડર્સ તપાસો)']
-    ],
-    stats: [
-      ['Active dispatches', '16 Trips'],
-      ['On-time rate', '98.2%'],
-      ['Shared route fuel savings', '24.8%']
-    ]
-  }
-};
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 export default function StakeholderDashboard({ user, onNavigate }) {
-  const data = content[user.role] || content.customer;
+  const { t } = useLanguage();
+
+  const roleConfigs = {
+    farmer: {
+      title: t('farmerTitle'),
+      description: t('farmerDesc'),
+      icon: Sprout,
+      badge: t('farmerBadge'),
+      actions: [
+        ['farmer-hub', t('actionAddHarvest')],
+        ['demand-forecast', t('actionSeeDemand')]
+      ],
+      stats: [
+        [t('activeListings'), '12 Lots'],
+        [t('matchedBuyers'), '8 Verified'],
+        [t('avgPriceUplift'), '+18.4%']
+      ]
+    },
+    customer: {
+      title: t('buyerTitle'),
+      description: t('buyerDesc'),
+      icon: ShoppingBag,
+      badge: t('buyerBadge'),
+      actions: [
+        ['marketplace', t('actionBrowseProduce')],
+        ['smart-match', t('actionMatchRequirement')]
+      ],
+      stats: [
+        [t('availableListings'), '68 Lots'],
+        [t('nearbyFarms'), '24 Farms'],
+        [t('avgProcurementSavings'), '21.5%']
+      ]
+    },
+    logistics: {
+      title: t('logisticsTitle'),
+      description: t('logisticsDesc'),
+      icon: Truck,
+      badge: t('logisticsBadge'),
+      actions: [
+        ['logistics', t('actionManageRoutes')],
+        ['logistics', t('actionReviewAssignments')]
+      ],
+      stats: [
+        [t('activeDispatches'), '16 Trips'],
+        [t('onTimeRate'), '98.2%'],
+        [t('sharedFuelSavings'), '24.8%']
+      ]
+    }
+  };
+
+  const data = roleConfigs[user.role] || roleConfigs.customer;
   const Icon = data.icon;
 
   return (
@@ -81,7 +84,7 @@ export default function StakeholderDashboard({ user, onNavigate }) {
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '14px' }}>
             <span style={{ background: 'rgba(254, 250, 224, 0.22)', backdropFilter: 'blur(8px)', border: '1px solid rgba(254, 250, 224, 0.35)', color: '#FEFAE0', padding: '4px 12px', borderRadius: '20px', fontSize: '0.78rem', fontWeight: 700 }}>
-              Logged in as: {user.name} ({user.role})
+              {t('loggedInAs')}: {user?.name || user?.email || 'User'} ({user?.role || 'member'})
             </span>
           </div>
         </div>
@@ -106,10 +109,10 @@ export default function StakeholderDashboard({ user, onNavigate }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <div>
             <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--palette-forest)', margin: 0 }}>
-              Nexus Platform Command Portals
+              {t('commandPortalsHeading')}
             </h2>
             <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-              Explore real-time trade signals, live shared dispatch routes, and direct farmgate supply
+              {t('commandPortalsSub')}
             </div>
           </div>
         </div>
@@ -124,16 +127,16 @@ export default function StakeholderDashboard({ user, onNavigate }) {
                 className="dashboard-feature-img"
               />
               <span className="dashboard-feature-badge" style={{ background: 'rgba(40, 54, 24, 0.88)' }}>
-                🌾 Direct Farmgate Market
+                🌾 {t('directMarketTitle')}
               </span>
             </div>
             <div className="dashboard-feature-body">
               <div>
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--palette-forest)', marginBottom: '4px' }}>
-                  Direct Farm Produce Marketplace
+                  {t('directMarketTitle')}
                 </h3>
                 <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', lineHeight: 1.4, margin: '0 0 14px 0' }}>
-                  Browse 68+ verified farmer lots with live photographs, Fair Price benchmarks, and Farm-to-Fork QR traceability.
+                  {t('directMarketDesc')}
                 </p>
               </div>
               <button
@@ -141,7 +144,7 @@ export default function StakeholderDashboard({ user, onNavigate }) {
                 onClick={() => onNavigate('marketplace')}
                 style={{ width: '100%', padding: '9px 14px', fontSize: '0.84rem' }}
               >
-                <ShoppingBag size={15} /> Open Marketplace (બજાર જુઓ)
+                <ShoppingBag size={15} /> {t('openMarketplace')}
               </button>
             </div>
           </div>
@@ -155,16 +158,16 @@ export default function StakeholderDashboard({ user, onNavigate }) {
                 className="dashboard-feature-img"
               />
               <span className="dashboard-feature-badge" style={{ background: 'rgba(188, 108, 37, 0.92)' }}>
-                🚚 Shared Transport Fleet
+                🚚 {t('sharedLogisticsTitle')}
               </span>
             </div>
             <div className="dashboard-feature-body">
               <div>
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--palette-forest)', marginBottom: '4px' }}>
-                  Smart Shared Logistics Engine
+                  {t('sharedLogisticsTitle')}
                 </h3>
                 <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', lineHeight: 1.4, margin: '0 0 14px 0' }}>
-                  Pool neighboring orders into unified delivery runs, eliminating empty return miles and lowering costs by up to 25%.
+                  {t('sharedLogisticsDesc')}
                 </p>
               </div>
               <button
@@ -172,7 +175,7 @@ export default function StakeholderDashboard({ user, onNavigate }) {
                 onClick={() => onNavigate('logistics')}
                 style={{ width: '100%', padding: '9px 14px', fontSize: '0.84rem' }}
               >
-                <Truck size={15} /> Open Logistics Grid (લોજિસ્ટિક્સ)
+                <Truck size={15} /> {t('openLogisticsGrid')}
               </button>
             </div>
           </div>
@@ -186,16 +189,16 @@ export default function StakeholderDashboard({ user, onNavigate }) {
                 className="dashboard-feature-img"
               />
               <span className="dashboard-feature-badge" style={{ background: 'rgba(96, 108, 56, 0.92)' }}>
-                📈 AI Price Intelligence
+                📈 {t('fairPriceTitle')}
               </span>
             </div>
             <div className="dashboard-feature-body">
               <div>
                 <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--palette-forest)', marginBottom: '4px' }}>
-                  Fair Price & Market Intelligence
+                  {t('fairPriceTitle')}
                 </h3>
                 <p style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', lineHeight: 1.4, margin: '0 0 14px 0' }}>
-                  Prophet AI price forecasts calibrated against 185 Agmarknet commodities protect both farmers and buyers.
+                  {t('fairPriceDesc')}
                 </p>
               </div>
               <button
@@ -203,7 +206,7 @@ export default function StakeholderDashboard({ user, onNavigate }) {
                 onClick={() => onNavigate('fair-price')}
                 style={{ width: '100%', padding: '9px 14px', fontSize: '0.84rem' }}
               >
-                <TrendingUp size={15} /> Check Price Bands (ભાવ આગાહી)
+                <TrendingUp size={15} /> {t('checkPriceBands')}
               </button>
             </div>
           </div>
@@ -212,7 +215,7 @@ export default function StakeholderDashboard({ user, onNavigate }) {
 
       {/* 4. Quick Actions Grid */}
       <div className="dashboard-actions">
-        <h2>Quick Workflow Actions</h2>
+        <h2>{t('quickActionsTitle')}</h2>
         <div className="dashboard-action-grid">
           {data.actions.map(([id, label]) => (
             <button key={id + label} onClick={() => onNavigate(id)}>
@@ -224,7 +227,7 @@ export default function StakeholderDashboard({ user, onNavigate }) {
       </div>
 
       {/* 5. Live Orders & Delivery Tracking */}
-      <DeliveryStatusPanel role={user.role} stakeholder={user.name} />
+      <DeliveryStatusPanel role={user?.role} stakeholder={user?.name || user?.email} />
     </div>
   );
 }
