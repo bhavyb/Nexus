@@ -15,7 +15,6 @@ import {
   Cpu,
   RefreshCw,
   ShoppingBag,
-  Award
 } from 'lucide-react';
 
 export default function SystemOverview({ onNavigate }) {
@@ -101,26 +100,6 @@ export default function SystemOverview({ onNavigate }) {
         }}
       >
         <div style={{ maxWidth: '840px', position: 'relative', zIndex: 2 }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              background: 'rgba(255, 255, 255, 0.15)',
-              backdropFilter: 'blur(8px)',
-              padding: '6px 14px',
-              borderRadius: '20px',
-              fontSize: '0.78rem',
-              fontWeight: 700,
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              color: 'var(--color-gold-border)',
-              marginBottom: '16px'
-            }}
-          >
-            <Sparkles size={14} /> SIH 2026 Innovation • Problem Statement SIH26033
-          </div>
-
           <h1
             style={{
               fontSize: '2.2rem',
@@ -141,7 +120,7 @@ export default function SystemOverview({ onNavigate }) {
               marginBottom: '24px'
             }}
           >
-            Moving beyond simple e-commerce: Nexus predicts demand before harvest, connects
+            Moving beyond simple e-commerce: annDhara predicts demand before harvest, connects
             farmers & FPOs directly with institutional bulk buyers and apartment community pools,
             optimizes multi-stop shared logistics, and halts perishable food waste in its tracks.
           </p>
@@ -190,7 +169,7 @@ export default function SystemOverview({ onNavigate }) {
         </div>
       </section>
 
-      {/* Traditional vs Nexus Side-by-Side Comparison */}
+      {/* Traditional vs annDhara Side-by-Side Comparison */}
       <section>
         <div style={{ marginBottom: '18px' }}>
           <h2 style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
@@ -258,7 +237,7 @@ export default function SystemOverview({ onNavigate }) {
             </ul>
           </div>
 
-          {/* Nexus Demand-to-Delivery Card */}
+          {/* annDhara Demand-to-Delivery Card */}
           <div
             className="nexus-card"
             style={{
@@ -269,12 +248,12 @@ export default function SystemOverview({ onNavigate }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
               <CheckCircle2 size={20} color="var(--color-crop)" />
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-crop)' }}>
-                Nexus Demand-to-Delivery Network
+                annDhara Demand-to-Delivery Network
               </h3>
             </div>
 
             <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginBottom: '16px' }}>
-              Farmer / FPO (₹24) → <strong>Nexus AI Network</strong> (+₹3.5 Logistics + ₹1.5 Fair Fee) → <strong>Buyer pays ₹29/kg</strong>
+              Farmer / FPO (₹24) → <strong>annDhara AI Network</strong> (+₹3.5 Logistics + ₹1.5 Fair Fee) → <strong>Buyer pays ₹29/kg</strong>
             </div>
 
             <div
@@ -513,33 +492,6 @@ export default function SystemOverview({ onNavigate }) {
         </div>
       </section>
 
-      {/* Internal Hackathon Pitch Notes Card */}
-      <section
-        style={{
-          background: 'linear-gradient(135deg, #1E6B2D12 0%, #D9822B15 100%)',
-          border: '1px solid var(--color-crop-border)',
-          borderRadius: 'var(--radius-lg)',
-          padding: '24px 26px'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-          <Award size={22} color="var(--color-turmeric)" />
-          <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
-            SIH 2026 Presentation Talking Points (For Team Pitch)
-          </h3>
-        </div>
-        <p style={{ fontSize: '0.84rem', color: 'var(--color-text-secondary)', lineHeight: 1.6, marginBottom: '14px' }}>
-          When presenting to the panel, emphasize: <em>"We did not merely build an online vegetable listing website.
-          We built an end-to-end demand-to-delivery network that addresses the core systemic flaws of Indian agriculture:
-          forecasting demand before harvest, locking buyer pre-commitments, clustering smallholder logistics, and halting perishables from rotting in local yards."</em>
-        </p>
-        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '0.78rem', fontWeight: 600 }}>
-          <span style={{ color: 'var(--color-crop)' }}>✓ 4 Middleman Layers Reduced to 1</span>
-          <span style={{ color: 'var(--color-crop)' }}>✓ +18.4% Farmer Revenue Increase</span>
-          <span style={{ color: 'var(--color-crop)' }}>✓ 35% Vehicle Trips Saved</span>
-          <span style={{ color: 'var(--color-crop)' }}>✓ 22% Food Wastage Averted</span>
-        </div>
-      </section>
     </div>
   );
 }

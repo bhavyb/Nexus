@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Award,
   TrendingUp,
   TrendingDown,
   Users,
@@ -42,7 +41,7 @@ export default function ImpactDashboard() {
   const traditionalMargin = traditionalConsumer - traditionalFarmer;
   const traditionalFarmerSharePct = ((traditionalFarmer / Math.max(1, traditionalConsumer)) * 100).toFixed(1);
 
-  // In Nexus: Farmer gets +60% of intermediate margin, direct logistics costs ₹3.50/kg, platform fee ₹1.50/kg
+  // In annDhara: Farmer gets +60% of intermediate margin, direct logistics costs ₹3.50/kg, platform fee ₹1.50/kg
   const nexusFarmer = Math.round((traditionalFarmer + (traditionalMargin * 0.35)) * 10) / 10;
   const nexusLogistics = 3.5;
   const nexusFee = 1.5;
@@ -73,13 +72,13 @@ export default function ImpactDashboard() {
       >
         <div>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', fontWeight: 700, color: 'var(--color-crop)', textTransform: 'uppercase' }}>
-            <Award size={14} /> SIH 2026 Internal Hackathon Evaluation Dashboard
+            <TrendingUp size={14} /> Platform Impact Dashboard
           </div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '4px 0 0 0' }}>
             Macro Socio-Economic & Supply Chain Impact 🔥
           </h2>
           <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-            Measurable impact metrics, live margin simulation, and direct alignment with hackathon evaluation rubrics.
+            Measurable impact metrics and live margin simulation.
           </div>
         </div>
 
@@ -177,7 +176,7 @@ export default function ImpactDashboard() {
               Live Supply Chain Margin Simulator (Side-by-Side Breakdown)
             </h3>
             <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              Adjust wholesale and consumer price levels to see how Nexus dynamically shifts value from middlemen back to farmers & consumers.
+              Adjust wholesale and consumer price levels to see how annDhara dynamically shifts value from middlemen back to farmers & consumers.
             </div>
           </div>
         </div>
@@ -293,7 +292,7 @@ export default function ImpactDashboard() {
             </div>
           </div>
 
-          {/* Nexus Platform Column */}
+          {/* annDhara Platform Column */}
           <div
             style={{
               background: '#FBFCFB',
@@ -303,7 +302,7 @@ export default function ImpactDashboard() {
             }}
           >
             <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--color-crop)', textTransform: 'uppercase', marginBottom: '10px' }}>
-              Nexus Demand-to-Delivery Platform
+              annDhara Demand-to-Delivery Platform
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.82rem' }}>
@@ -317,7 +316,7 @@ export default function ImpactDashboard() {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
-              <span>Nexus Platform Fair Clearing Fee:</span>
+              <span>annDhara Platform Fair Clearing Fee:</span>
               <span>+₹{nexusFee.toFixed(2)}/kg</span>
             </div>
 
@@ -381,33 +380,6 @@ export default function ImpactDashboard() {
         </div>
       </div>
 
-      {/* SIH 2026 Judging Rubric Alignment Card */}
-      <div className="nexus-card">
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', marginBottom: '14px' }}>
-          SIH 2026 Internal Hackathon Rubric Alignment
-        </h3>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
-          {impactData?.sih_rubric_alignment?.map((rubric, idx) => (
-            <div
-              key={idx}
-              style={{
-                background: 'var(--color-bg-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '14px',
-                border: '1px solid var(--color-border)'
-              }}
-            >
-              <div style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
-                {rubric.criterion}
-              </div>
-              <div style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)', marginTop: '4px', lineHeight: 1.5 }}>
-                {rubric.status}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

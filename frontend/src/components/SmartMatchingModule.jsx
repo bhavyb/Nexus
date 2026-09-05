@@ -25,6 +25,8 @@ export default function SmartMatchingModule({ commodities = [], locationsData = 
   const [matchResult, setMatchResult] = useState(null);
   const [matching, setMatching] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchMessage, setDispatchMessage] = useState('');
 
   // Auto-fetch authentic Agmarknet dataset modal price when commodity changes
   useEffect(() => {
@@ -68,6 +70,35 @@ export default function SmartMatchingModule({ commodities = [], locationsData = 
       })
       .catch((err) => console.error('Error running smart match:', err))
       .finally(() => setMatching(false));
+  };
+
+  const createDeliveryAssignments = async () => {
+    if (!matchResult?.allocations?.length) return;
+    setDispatching(true);
+    setDispatchMessage('');
+    try {
+      const responses = await Promise.all(matchResult.allocations.map((allocation) => fetch('/api/deliveries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          crop: selectedCrop,
+          quantity_kg: allocation.allocated_quantity_kg,
+          farmer_name: matchResult.farmer_name || 'Matched farmer',
+          buyer_name: allocation.buyer_name,
+          pickup_location: farmerLocation,
+          destination: allocation.location
+        })
+      })));
+      const results = await Promise.all(responses.map((response) => response.json()));
+      const failed = results.find((result) => !result.success);
+      if (failed) throw new Error(failed.error || 'Unable to create delivery assignments');
+      setConfirmed(true);
+      setDispatchMessage(`${results.length} delivery assignment${results.length === 1 ? '' : 's'} created for logistics partners.`);
+    } catch (err) {
+      setDispatchMessage(err.message);
+    } finally {
+      setDispatching(false);
+    }
   };
 
   useEffect(() => {
@@ -414,7 +445,8 @@ export default function SmartMatchingModule({ commodities = [], locationsData = 
 
             <button
               className="btn-primary"
-              onClick={() => onNavigateToLogistics && onNavigateToLogistics()}
+              onClick={createDeliveryAssignments}
+              disabled={dispatching || confirmed}
               style={{
                 background: '#7C3AED',
                 borderColor: '#7C3AED',
@@ -423,8 +455,9 @@ export default function SmartMatchingModule({ commodities = [], locationsData = 
                 fontWeight: 700
               }}
             >
-              <Truck size={16} /> Open Logistics Optimizer <ArrowRight size={16} />
+              <Truck size={16} /> {dispatching ? 'Creating assignments...' : confirmed ? 'Assignments created' : 'Create delivery assignments'} <ArrowRight size={16} />
             </button>
+            {dispatchMessage && <div style={{ flexBasis: '100%', fontSize: '0.8rem', color: confirmed ? 'var(--color-crop)' : 'var(--color-accent-red)' }}>{dispatchMessage}</div>}
           </div>
         </div>
       )}

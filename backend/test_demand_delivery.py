@@ -107,5 +107,38 @@ class TestDemandToDeliveryNetwork(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertEqual(data["data"]["summary"]["middlemen_reduced"]["nexus"], 1)
 
+    def test_delivery_assignment_acceptance_and_progress(self):
+        created = self.client.post("/api/deliveries", json={
+            "crop": "Tomato",
+            "quantity_kg": 42,
+            "farmer_name": "Test Farmer",
+            "buyer_name": "Test Buyer",
+            "pickup_location": "Test Farm",
+            "destination": "Test Hub",
+        })
+        self.assertEqual(created.status_code, 201)
+        delivery = created.get_json()["delivery"]
+        self.assertEqual(delivery["status"], "Assigned")
+
+        accepted = self.client.post(
+            f"/api/deliveries/{delivery['reference']}/accept",
+            json={"logistics_name": "Test Carrier"},
+        )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.get_json()["delivery"]["status"], "Accepted")
+
+        progressed = self.client.patch(
+            f"/api/deliveries/{delivery['reference']}/status",
+            json={"status": "Picked Up"},
+        )
+        self.assertEqual(progressed.status_code, 200)
+        self.assertEqual(progressed.get_json()["delivery"]["status"], "Picked Up")
+
+        # Clean up test delivery so dummy data never pollutes DB
+        from marketplace_db import get_db_connection
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM delivery_updates WHERE reference = ?", (delivery["reference"],))
+            conn.commit()
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,8 @@ import FoodWasteModule from './components/FoodWasteModule.jsx';
 import FairPriceModule from './components/FairPriceModule.jsx';
 import MandiCompareModule from './components/MandiCompareModule.jsx';
 import MarkupAnomalyModule from './components/MarkupAnomalyModule.jsx';
+import AuthScreen from './components/AuthScreen.jsx';
+import StakeholderDashboard from './components/StakeholderDashboard.jsx';
 
 import {
   Sparkles,
@@ -30,7 +32,10 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [user, setUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nexus_user')) || null; } catch { return null; }
+  });
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [statusData, setStatusData] = useState(null);
   const [commodities, setCommodities] = useState([]);
   const [locationsData, setLocationsData] = useState({ states: [], districts: [], markets: [] });
@@ -68,7 +73,7 @@ export default function App() {
     } catch (err) {
       console.error('Error connecting to backend:', err);
       setBackendError(
-        'Cannot connect to the Nexus backend server. Please verify Flask is running on port 5000.'
+        'Cannot connect to the annDhara backend server. Please verify Flask is running on port 5000.'
       );
     } finally {
       setLoadingInitial(false);
@@ -81,58 +86,78 @@ export default function App() {
 
   const primaryTabs = [
     {
+      id: 'dashboard',
+      label: 'My Dashboard',
+      icon: <LayoutDashboard size={15} />
+    },
+    {
       id: 'overview',
       label: 'Overview & Pitch',
-      icon: <LayoutDashboard size={15} />,
-      badge: 'Architecture'
+      icon: <LayoutDashboard size={15} />
     },
     {
       id: 'farmer-hub',
       label: 'Farmer & FPO Portal',
-      icon: <Sprout size={15} />,
-      badge: 'Sellability'
+      icon: <Sprout size={15} />
     },
     {
       id: 'marketplace',
       label: 'Buyer Marketplace',
-      icon: <ShoppingBag size={15} />,
-      badge: 'Bulk & Society'
+      icon: <ShoppingBag size={15} />
     },
     {
       id: 'demand-forecast',
       label: 'Demand & Heatmap',
-      icon: <TrendingUp size={15} />,
-      badge: 'Prophet AI'
+      icon: <TrendingUp size={15} />
     },
     {
       id: 'smart-match',
       label: 'AI Smart Matching',
-      icon: <Sparkles size={15} />,
-      badge: 'Multi-Buyer'
+      icon: <Sparkles size={15} />
     },
     {
       id: 'logistics',
       label: 'Shared Logistics',
-      icon: <Truck size={15} />,
-      badge: 'CVRP Routing'
+      icon: <Truck size={15} />
     },
     {
       id: 'food-waste',
       label: 'Waste Prevention',
-      icon: <Flame size={15} />,
-      badge: 'Perishables'
+      icon: <Flame size={15} />
     }
-  ];
+  ].filter((tab) => {
+    if (tab.id === 'overview') return false;
+    if (tab.id === 'farmer-hub') return user?.role === 'farmer';
+    if (tab.id === 'marketplace') return user?.role === 'customer' || user?.role === 'farmer';
+    if (tab.id === 'logistics') return user?.role === 'logistics';
+    if (tab.id === 'demand-forecast') return user?.role === 'farmer';
+    if (tab.id === 'smart-match') return user?.role === 'customer' || user?.role === 'farmer';
+    if (tab.id === 'food-waste') return user?.role === 'farmer';
+    return tab.id === 'dashboard';
+  });
 
   const secondaryTools = [
     { id: 'fair-price', label: 'Prophet Price Curve', icon: <Sparkles size={14} /> },
     { id: 'mandi-compare', label: 'Mandi Net Profit Comparator', icon: <Compass size={14} /> },
     { id: 'markup-anomaly', label: 'Retail Markup Anomaly Detector', icon: <AlertOctagon size={14} /> }
-  ];
+  ].filter((tool) => user?.role === 'farmer' ? tool.id !== 'markup-anomaly' : user?.role === 'customer' ? tool.id === 'markup-anomaly' : false);
+
+  const handleAuthenticated = (authenticatedUser) => {
+    localStorage.setItem('nexus_user', JSON.stringify(authenticatedUser));
+    setUser(authenticatedUser);
+    setActiveTab('dashboard');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('nexus_user');
+    setUser(null);
+  };
+
+  if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} />;
 
   return (
     <div>
-      <Header statusData={statusData} onRefreshSuccess={loadInitialData} />
+      <Header statusData={statusData} onRefreshSuccess={loadInitialData} user={user} onLogout={handleLogout} />
 
       <main className="app-container">
         {/* Backend Error Banner */}
@@ -156,7 +181,7 @@ export default function App() {
         {/* Primary Tab Navigation */}
         <nav
           className="module-tabs"
-          aria-label="Nexus Core Modules"
+          aria-label="annDhara Core Modules"
         >
           {primaryTabs.map((tab) => (
             <button
@@ -166,7 +191,6 @@ export default function App() {
             >
               {tab.icon}
               <span>{tab.label}</span>
-              <span className="tab-badge">{tab.badge}</span>
             </button>
           ))}
         </nav>
@@ -234,7 +258,7 @@ export default function App() {
               style={{ margin: '0 auto 16px auto', color: 'var(--color-crop)' }}
             />
             <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-soil-dark)' }}>
-              Connecting to Nexus Farm-to-Market Network...
+              Connecting to annDhara Farm-to-Market Network...
             </h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
               Initializing demand models, regional heatmaps, and agricultural data feeds
@@ -243,18 +267,22 @@ export default function App() {
         ) : (
           <div>
             {/* 1. Overview & Pitch */}
+            {activeTab === 'dashboard' && (
+              <StakeholderDashboard user={user} onNavigate={(target) => setActiveTab(target)} />
+            )}
+
             {activeTab === 'overview' && (
               <SystemOverview onNavigate={(target) => setActiveTab(target)} />
             )}
 
             {/* 2. Farmer & FPO Portal */}
             {activeTab === 'farmer-hub' && (
-              <FarmerHub commodities={commodities} locationsData={locationsData} />
+              <FarmerHub user={user} commodities={commodities} locationsData={locationsData} />
             )}
 
             {/* 3. Buyer & Community Marketplace */}
             {activeTab === 'marketplace' && (
-              <MarketplaceModule commodities={commodities} locationsData={locationsData} />
+              <MarketplaceModule user={user} commodities={commodities} locationsData={locationsData} />
             )}
 
             {/* 4. Demand Forecasting & Regional Heatmap */}
@@ -312,13 +340,9 @@ export default function App() {
           }}
         >
           <div>
-            <strong>Nexus</strong> • AI-Powered Demand-to-Delivery Agricultural Network
+            <strong>annDhara</strong> • AI-Powered Demand-to-Delivery Agricultural Network
           </div>
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-            <span>Smart India Hackathon SIH26033</span>
-            <span>•</span>
-            <span>Zero-Intermediary Farmgate-to-Fork Architecture</span>
-          </div>
+          <div>Transparent Farmgate-to-Fork Network</div>
         </footer>
       </main>
     </div>

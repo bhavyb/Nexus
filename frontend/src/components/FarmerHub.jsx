@@ -17,12 +17,17 @@ import {
   QrCode,
   Sparkles,
   RefreshCw,
-  Clock
+  Clock,
+  Truck
 } from 'lucide-react';
 import { getCropDisplayName, getCropGujaratiOnly } from '../utils/cropTranslations';
+import { getCropImage } from '../utils/cropImages';
 import TraceabilityModal from './TraceabilityModal.jsx';
+import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
 
-export default function FarmerHub({ commodities = [], locationsData = { states: [], districts: [], markets: [] } }) {
+export default function FarmerHub({ user, commodities = [], locationsData = { states: [], districts: [], markets: [] } }) {
+  const [activeFarmerTab, setActiveFarmerTab] = useState('orders'); // 'orders', 'produce'
+  const [listingsFilter, setListingsFilter] = useState('my'); // 'my', 'all'
   const [listings, setListings] = useState([]);
   const [loadingListings, setLoadingListings] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -30,14 +35,14 @@ export default function FarmerHub({ commodities = [], locationsData = { states: 
 
   // Harvest Registration Form State
   const [formData, setFormData] = useState({
-    farmer_name: 'Gujarat Agro Collective',
-    phone: '+91 98251 34812',
+    farmer_name: user?.name || 'Gujarat Agro Collective',
+    phone: user?.phone || '+91 98251 34812',
     crop: commodities[0] || 'Tomato',
     variety: 'Hybrid Grade 1',
     quantity_kg: 500,
     asking_price_kg: 22.0,
     min_price_kg: 19.5,
-    location: 'Gondal Apmc, Rajkot (Gujarat)',
+    location: user?.location || 'Gondal Apmc, Rajkot (Gujarat)',
     state: 'Gujarat',
     is_pre_harvest: 0,
     harvest_date: new Date().toISOString().split('T')[0],
@@ -118,6 +123,31 @@ export default function FarmerHub({ commodities = [], locationsData = { states: 
   useEffect(() => {
     loadFarmerListings();
   }, []);
+
+  // Synchronize authenticated farmer details into form state
+  useEffect(() => {
+    if (user?.name) {
+      setFormData((prev) => ({
+        ...prev,
+        farmer_name: user.name,
+        phone: user.phone || prev.phone,
+        location: user.location || prev.location
+      }));
+    }
+  }, [user]);
+
+  const displayedListings = listings.filter((item) => {
+    if (listingsFilter === 'all') return true;
+    const farmerName = (user?.name || formData.farmer_name || '').toLowerCase();
+    const phone = (user?.phone || formData.phone || '').replace(/[^0-9]/g, '');
+    const itemPhone = (item.phone || '').replace(/[^0-9]/g, '');
+    const itemFarmer = (item.farmer_name || '').toLowerCase();
+    return (
+      (farmerName && (itemFarmer.includes(farmerName) || farmerName.includes(itemFarmer))) ||
+      (phone && itemPhone && (itemPhone.includes(phone) || phone.includes(itemPhone))) ||
+      itemFarmer.includes('gujarat')
+    );
+  });
 
   const handleRegisterHarvest = async (e) => {
     e.preventDefault();
@@ -322,167 +352,284 @@ export default function FarmerHub({ commodities = [], locationsData = { states: 
         </div>
       </div>
 
-      {/* Active Farmer Harvests & Pre-Bookings */}
-      <div className="nexus-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-          <div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
-              Registered Harvests & Active Supply Lots
-            </h3>
-            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-              Live inventory connected to the Nexus Buyer Matching & Shared Logistics Engine
+      {/* Sub-Tabs: Incoming Orders vs Registered Produce Batches */}
+      <div
+        style={{
+          display: 'flex',
+          background: 'var(--color-bg-subtle)',
+          padding: '4px',
+          borderRadius: '10px',
+          border: '1px solid var(--color-border)',
+          width: 'fit-content',
+          gap: '6px'
+        }}
+      >
+        <button
+          onClick={() => setActiveFarmerTab('orders')}
+          style={{
+            padding: '9px 18px',
+            borderRadius: '8px',
+            border: 'none',
+            background: activeFarmerTab === 'orders' ? 'white' : 'transparent',
+            color: activeFarmerTab === 'orders' ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)',
+            fontWeight: 800,
+            fontSize: '0.86rem',
+            cursor: 'pointer',
+            boxShadow: activeFarmerTab === 'orders' ? 'var(--shadow-sm)' : 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <Truck size={17} color="var(--color-crop)" /> 📦 Incoming Orders & Logistics (મને મળેલા ઓર્ડર્સ)
+        </button>
+
+        <button
+          onClick={() => setActiveFarmerTab('produce')}
+          style={{
+            padding: '9px 18px',
+            borderRadius: '8px',
+            border: 'none',
+            background: activeFarmerTab === 'produce' ? 'white' : 'transparent',
+            color: activeFarmerTab === 'produce' ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)',
+            fontWeight: 800,
+            fontSize: '0.86rem',
+            cursor: 'pointer',
+            boxShadow: activeFarmerTab === 'produce' ? 'var(--shadow-sm)' : 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <Sprout size={17} color="var(--color-crop)" /> 🌾 Registered Crops & Harvest Lots ({listings.length})
+        </button>
+      </div>
+
+      {/* TAB 1: INCOMING BUYER ORDERS & LOGISTICS PICKUP TRACKING */}
+      {activeFarmerTab === 'orders' && (
+        <DeliveryStatusPanel
+          role="farmer"
+          stakeholder={user?.name || formData.farmer_name || 'Farmer'}
+        />
+      )}
+
+      {/* TAB 2: ACTIVE FARMER HARVESTS & PRE-BOOKINGS */}
+      {activeFarmerTab === 'produce' && (
+        <div className="nexus-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                Registered Harvests & Active Supply Lots
+              </h3>
+              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                Live inventory connected to the Nexus Buyer Matching & Shared Logistics Engine
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', background: 'var(--color-bg-subtle)', borderRadius: '6px', padding: '2px', border: '1px solid var(--color-border)' }}>
+                <button
+                  onClick={() => setListingsFilter('my')}
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: '0.76rem',
+                    borderRadius: '4px',
+                    border: 'none',
+                    background: listingsFilter === 'my' ? 'white' : 'transparent',
+                    fontWeight: listingsFilter === 'my' ? 700 : 500,
+                    cursor: 'pointer',
+                    color: listingsFilter === 'my' ? 'var(--color-crop)' : 'var(--color-text-secondary)'
+                  }}
+                >
+                  My Harvest Lots ({displayedListings.length})
+                </button>
+                <button
+                  onClick={() => setListingsFilter('all')}
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: '0.76rem',
+                    borderRadius: '4px',
+                    border: 'none',
+                    background: listingsFilter === 'all' ? 'white' : 'transparent',
+                    fontWeight: listingsFilter === 'all' ? 700 : 500,
+                    cursor: 'pointer',
+                    color: listingsFilter === 'all' ? 'var(--color-crop)' : 'var(--color-text-secondary)'
+                  }}
+                >
+                  All Mandi Network ({listings.length})
+                </button>
+              </div>
+
+              <button className="btn-secondary" onClick={loadFarmerListings} style={{ padding: '6px 12px', fontSize: '0.78rem' }}>
+                <RefreshCw size={13} className={loadingListings ? 'spin-icon' : ''} /> Refresh
+              </button>
             </div>
           </div>
 
-          <button className="btn-secondary" onClick={loadFarmerListings} style={{ padding: '6px 12px', fontSize: '0.78rem' }}>
-            <RefreshCw size={13} className={loadingListings ? 'spin-icon' : ''} /> Refresh
-          </button>
-        </div>
+          {loadingListings ? (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <RefreshCw size={26} className="spin-icon" style={{ margin: '0 auto 8px auto', color: 'var(--color-crop)' }} />
+              <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>Loading verified farmer listings...</p>
+            </div>
+          ) : !displayedListings.length ? (
+            <div style={{ textAlign: 'center', padding: '36px 20px', background: 'var(--color-bg-subtle)', borderRadius: '8px' }}>
+              <Sprout size={32} color="var(--color-crop)" style={{ margin: '0 auto 8px auto' }} />
+              <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>No crops registered yet</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                Click "+ Add New Crop / Harvest" above to register your produce lot.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
+              {displayedListings.map((item) => {
+                const isPre = item.is_pre_harvest === 1;
+                return (
+                  <div key={item.id} className="produce-card">
+                    {/* Visual Media Header with Crop Photo */}
+                    <div className="produce-card-media">
+                      <img
+                        src={getCropImage(item.crop)}
+                        alt={item.crop}
+                        className="produce-card-img"
+                        loading="lazy"
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80';
+                        }}
+                      />
 
-        {loadingListings ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <RefreshCw size={26} className="spin-icon" style={{ margin: '0 auto 8px auto', color: 'var(--color-crop)' }} />
-            <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>Loading verified farmer listings...</p>
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
-            {listings.map((item) => {
-              const isPre = item.is_pre_harvest === 1;
-              return (
-                <div
-                  key={item.id}
-                  style={{
-                    background: 'white',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '16px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    boxShadow: 'var(--shadow-sm)'
-                  }}
-                >
-                  <div>
-                    {/* Header line with pre-harvest pill */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                       <span
+                        className="produce-card-badge-top-left"
                         style={{
-                          background: isPre ? '#EFF6FF' : 'var(--color-crop-light)',
-                          color: isPre ? '#2563EB' : 'var(--color-crop)',
-                          border: `1px solid ${isPre ? '#BFDBFE' : 'var(--color-crop-border)'}`,
-                          fontSize: '0.72rem',
-                          fontWeight: 700,
-                          padding: '3px 8px',
-                          borderRadius: '12px'
+                          background: isPre ? 'rgba(37, 99, 235, 0.92)' : 'rgba(40, 54, 24, 0.88)',
+                          color: '#FEFAE0'
                         }}
                       >
-                        {isPre ? '📅 Pre-Harvest Commitment' : '✓ Ready Harvest'}
+                        {isPre ? '📅 Pre-Harvest' : '✓ Harvest Ready'}
                       </span>
 
                       <span
+                        className="produce-card-badge-top-right"
                         style={{
-                          fontSize: '0.72rem',
-                          fontWeight: 700,
-                          color: (item.sellability_score || 85) >= 80 ? 'var(--color-crop)' : 'var(--color-turmeric)'
+                          background: (item.sellability_score || 85) >= 80 ? 'rgba(96, 108, 56, 0.92)' : 'rgba(188, 108, 37, 0.92)'
                         }}
                       >
-                        Sellability: {item.sellability_score || 85}%
+                        ⭐ {item.sellability_score || 85}% AI Score
                       </span>
+
+                      <div className="produce-card-price-overlay">
+                        ₹{Number(item.asking_price_kg || 0).toFixed(2)}
+                        <span style={{ fontSize: '0.72rem', opacity: 0.9 }}>/kg</span>
+                      </div>
                     </div>
 
-                    <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
-                      {getCropDisplayName(item.crop)}
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-                      Variety: {item.variety || 'Standard'} • Grower: <strong>{item.farmer_name}</strong>
-                    </div>
-
-                    <div
-                      style={{
-                        margin: '12px 0',
-                        padding: '10px 12px',
-                        background: 'var(--color-bg-subtle)',
-                        borderRadius: 'var(--radius-sm)',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}
-                    >
+                    {/* Card Content Details */}
+                    <div className="produce-card-content">
                       <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-                          Quantity Available
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                          <div>
+                            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                              {getCropDisplayName(item.crop)}
+                            </h3>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                              Variety: <strong>{item.variety || 'Desi Standard'}</strong>
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', display: 'block', textTransform: 'uppercase', fontWeight: 700 }}>Grower</span>
+                            <strong style={{ fontSize: '0.82rem', color: 'var(--palette-forest)' }}>{item.farmer_name}</strong>
+                          </div>
                         </div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
-                          {(item.quantity_kg || 0).toLocaleString()} kg
+
+                        <div
+                          style={{
+                            margin: '12px 0',
+                            padding: '10px 12px',
+                            background: 'var(--color-bg-subtle)',
+                            borderRadius: 'var(--radius-sm)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                              Volume In Stock
+                            </div>
+                            <div style={{ fontSize: '1.18rem', fontWeight: 800, color: 'var(--palette-forest)' }}>
+                              {(item.quantity_kg || 0).toLocaleString()} kg
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                              Estimated Value
+                            </div>
+                            <div style={{ fontSize: '1.12rem', fontWeight: 800, color: 'var(--palette-terracotta)' }}>
+                              ₹{((item.quantity_kg || 0) * (item.asking_price_kg || 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </div>
+                          </div>
                         </div>
+
+                        <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <MapPin size={13} color="var(--palette-terracotta)" />
+                          <span>{item.location}</span>
+                        </div>
+
+                        {item.notes && (
+                          <div style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: '10px' }}>
+                            "{item.notes}"
+                          </div>
+                        )}
                       </div>
 
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-                          Asking Price
-                        </div>
-                        <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-crop)' }}>
-                          ₹{Number(item.asking_price_kg || 0).toFixed(2)}<span style={{ fontSize: '0.75rem' }}>/kg</span>
-                        </div>
+                      {/* Actions: WhatsApp + Traceability */}
+                      <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--color-border)', paddingTop: '12px', marginTop: '6px' }}>
+                        <button
+                          className="btn-secondary"
+                          onClick={() => setSelectedTraceListing(item)}
+                          style={{
+                            flex: 1,
+                            padding: '7px 10px',
+                            fontSize: '0.74rem',
+                            justifyContent: 'center',
+                            color: 'var(--color-soil)'
+                          }}
+                        >
+                          <QrCode size={14} /> Farm-to-Fork QR
+                        </button>
+
+                        <a
+                          href={`https://wa.me/${(item.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                            `Namaste ${item.farmer_name}, I saw your ${item.crop} listing on Nexus.`
+                          )}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn-primary"
+                          style={{
+                            padding: '7px 14px',
+                            fontSize: '0.75rem',
+                            background: '#25D366',
+                            borderColor: '#25D366',
+                            color: 'white',
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                        >
+                          <MessageCircle size={14} /> WhatsApp
+                        </a>
                       </div>
                     </div>
-
-                    <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginBottom: '8px' }}>
-                      <MapPin size={12} style={{ display: 'inline', marginRight: '4px' }} />
-                      {item.location}
-                    </div>
-
-                    {item.notes && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: '12px' }}>
-                        "{item.notes}"
-                      </div>
-                    )}
                   </div>
-
-                  {/* Actions: WhatsApp + Traceability */}
-                  <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--color-border)', paddingTop: '12px', marginTop: '6px' }}>
-                    <button
-                      className="btn-secondary"
-                      onClick={() => setSelectedTraceListing(item)}
-                      style={{
-                        flex: 1,
-                        padding: '7px 10px',
-                        fontSize: '0.74rem',
-                        justifyContent: 'center',
-                        color: 'var(--color-soil)'
-                      }}
-                    >
-                      <QrCode size={14} /> Farm-to-Fork QR
-                    </button>
-
-                    <a
-                      href={`https://wa.me/${(item.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                        `Namaste ${item.farmer_name}, I saw your ${item.crop} listing on Nexus.`
-                      )}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn-primary"
-                      style={{
-                        padding: '7px 12px',
-                        fontSize: '0.75rem',
-                        background: '#25D366',
-                        borderColor: '#25D366',
-                        color: 'white',
-                        textDecoration: 'none',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px'
-                      }}
-                    >
-                      <MessageCircle size={14} /> WhatsApp
-                    </a>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Modal: Add Harvest Registration */}
       {showAddModal && (

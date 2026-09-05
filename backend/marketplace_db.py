@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from data_cleaner import clean_text
+from werkzeug.security import check_password_hash, generate_password_hash
 
 logger = logging.getLogger("NexusMarketplace")
 
@@ -147,6 +148,53 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('farmer', 'customer', 'logistics')),
+                phone TEXT DEFAULT '',
+                location TEXT DEFAULT '',
+                organization TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS delivery_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                reference TEXT NOT NULL UNIQUE,
+                crop TEXT NOT NULL,
+                quantity_kg REAL NOT NULL,
+                farmer_name TEXT NOT NULL,
+                buyer_name TEXT NOT NULL,
+                logistics_name TEXT NOT NULL,
+                pickup_location TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'Assigned',
+                updated_at TEXT NOT NULL
+            )
+        """)
+        # Delivery assignments were initially seeded as a display-only feed.  Keep
+        # that data compatible while adding the relationships needed for live
+        # listing -> buyer -> carrier workflows.
+        cursor.execute("PRAGMA table_info(delivery_updates)")
+        delivery_columns = [row[1] for row in cursor.fetchall()]
+        for column, definition in (
+            ("listing_id", "INTEGER"),
+            ("demand_id", "INTEGER"),
+            ("logistics_id", "INTEGER"),
+            ("accepted_at", "TEXT DEFAULT ''"),
+            ("created_at", "TEXT DEFAULT ''"),
+            ("current_location", "TEXT DEFAULT ''"),
+            ("vehicle_number", "TEXT DEFAULT ''"),
+            ("eta", "TEXT DEFAULT ''"),
+        ):
+            if column not in delivery_columns:
+                cursor.execute(f"ALTER TABLE delivery_updates ADD COLUMN {column} {definition}")
 
         conn.commit()
 
@@ -646,6 +694,321 @@ def register_logistics_partner(
         return dict(row) if row else {}
 
 
+# =============================================================================
+# USER ACCOUNT FUNCTIONS
+# =============================================================================
+
+VALID_USER_ROLES = {"farmer", "customer", "logistics"}
+
+
+def _public_user(row: sqlite3.Row) -> Dict[str, Any]:
+    """Returns account fields that are safe to send to the client."""
+    user = dict(row)
+    user.pop("password_hash", None)
+    return user
+
+
+def create_user(
+    name: str,
+    email: str,
+    password: str,
+    role: str,
+    phone: str = "",
+    location: str = "",
+    organization: str = "",
+) -> Dict[str, Any]:
+    """Creates a stakeholder account with a one-way password hash."""
+    normalized_role = role.strip().lower()
+    normalized_email = email.strip().lower()
+    if normalized_role not in VALID_USER_ROLES:
+        raise ValueError("Choose a valid stakeholder role")
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters")
+    if not name.strip() or not normalized_email:
+        raise ValueError("Name and email are required")
+
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO users
+                    (name, email, password_hash, role, phone, location, organization, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    clean_text(name),
+                    normalized_email,
+                    generate_password_hash(password),
+                    normalized_role,
+                    phone.strip(),
+                    clean_text(location),
+                    clean_text(organization),
+                    created_at,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("An account with this email already exists") from exc
+        conn.commit()
+        cursor.execute("SELECT * FROM users WHERE id = ?", (cursor.lastrowid,))
+        row = cursor.fetchone()
+        return _public_user(row) if row else {}
+
+
+def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
+    """Validates credentials and returns a public user profile."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE email = ? COLLATE NOCASE", (email.strip(),))
+        row = cursor.fetchone()
+        if not row or not check_password_hash(row["password_hash"], password):
+            return None
+        return _public_user(row)
+
+
+DELIVERY_STATUSES = ("Assigned", "Accepted", "Picked Up", "In Transit", "Delivered")
+DELIVERY_STATUS_ORDER = {status: index for index, status in enumerate(DELIVERY_STATUSES)}
+
+def create_delivery_assignment(
+    crop: str,
+    quantity_kg: float,
+    farmer_name: str,
+    buyer_name: str,
+    pickup_location: str,
+    destination: str,
+    listing_id: Optional[int] = None,
+    demand_id: Optional[int] = None,
+    logistics_id: Optional[int] = None,
+    logistics_name: str = "Unassigned",
+    current_location: str = "",
+    vehicle_number: str = "",
+    eta: str = "",
+) -> Dict[str, Any]:
+    """Create a durable assignment shared by the three stakeholder portals with live location tracking."""
+    if float(quantity_kg) <= 0:
+        raise ValueError("Quantity must be greater than zero")
+    required = (crop, farmer_name, buyer_name, pickup_location, destination)
+    if any(not str(value).strip() for value in required):
+        raise ValueError("Crop, parties, pickup, and destination are required")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    reference = f"NX-{datetime.now().strftime('%y%m%d%H%M%S')}-{abs(hash((crop, farmer_name, buyer_name, now))) % 1000:03d}"
+    loc = current_location.strip() or f"Awaiting pickup dispatch at {pickup_location.strip()}"
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO delivery_updates
+               (reference, crop, quantity_kg, farmer_name, buyer_name, logistics_name,
+                pickup_location, destination, status, updated_at, listing_id, demand_id,
+                logistics_id, accepted_at, created_at, current_location, vehicle_number, eta)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Assigned', ?, ?, ?, ?, '', ?, ?, ?, ?)""",
+            (reference, clean_text(crop), float(quantity_kg), clean_text(farmer_name),
+             clean_text(buyer_name), clean_text(logistics_name) or "Unassigned",
+             clean_text(pickup_location), clean_text(destination), now, listing_id,
+             demand_id, logistics_id, now, loc, clean_text(vehicle_number), clean_text(eta)),
+        )
+        conn.commit()
+        row = cursor.execute("SELECT * FROM delivery_updates WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return dict(row)
+
+
+def get_delivery_by_reference(reference: str) -> Optional[Dict[str, Any]]:
+    """Returns a single delivery record by tracking reference code."""
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT * FROM delivery_updates WHERE LOWER(reference) = LOWER(?)", (reference.strip(),)).fetchone()
+        return dict(row) if row else None
+
+
+def get_delivery_updates(role: Optional[str] = None, stakeholder: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Returns assignments, strictly scoped to a stakeholder's role/name for farmer/customer."""
+    where_clauses: List[str] = [
+        "LOWER(farmer_name) NOT LIKE '%test%'",
+        "LOWER(buyer_name) NOT LIKE '%test%'",
+        "LOWER(pickup_location) NOT LIKE '%test%'",
+        "LOWER(destination) NOT LIKE '%test%'"
+    ]
+    params: List[Any] = []
+    normalized_role = (role or "").strip().lower()
+    if stakeholder and normalized_role in {"farmer", "customer"}:
+        field = {"farmer": "farmer_name", "customer": "buyer_name"}[normalized_role]
+        clean_stakeholder = stakeholder.strip()
+
+        extra_listing_ids: List[int] = []
+        extra_names: List[str] = []
+
+        if normalized_role == "farmer":
+            with get_db_connection() as conn:
+                u_row = conn.execute(
+                    "SELECT * FROM users WHERE LOWER(name) = LOWER(?) OR phone = ?",
+                    (clean_stakeholder, clean_stakeholder)
+                ).fetchone()
+                if u_row:
+                    if u_row["organization"] and u_row["organization"].strip():
+                        extra_names.append(u_row["organization"].strip())
+                    list_query = "SELECT id, farmer_name FROM listings WHERE LOWER(farmer_name) = LOWER(?) OR (phone <> '' AND phone = ?)"
+                    list_params = [clean_stakeholder, u_row["phone"] or ""]
+                    if u_row["organization"] and u_row["organization"].strip():
+                        list_query += " OR LOWER(farmer_name) = LOWER(?)"
+                        list_params.append(u_row["organization"].strip())
+                    for l_rec in conn.execute(list_query, list_params).fetchall():
+                        extra_listing_ids.append(l_rec["id"])
+                        if l_rec["farmer_name"] and l_rec["farmer_name"] not in extra_names:
+                            extra_names.append(l_rec["farmer_name"])
+
+        tokens = [t for t in clean_stakeholder.replace("(", " ").replace(")", " ").replace("-", " ").split() if len(t) > 1]
+        conditions = []
+        if tokens:
+            and_clauses = " AND ".join([f"LOWER({field}) LIKE LOWER(?)" for _ in tokens])
+            conditions.append(f"({and_clauses})")
+            for t in tokens:
+                params.append(f"%{t}%")
+        conditions.append(f"LOWER({field}) = LOWER(?)")
+        params.append(clean_stakeholder)
+        conditions.append(f"LOWER(?) LIKE ('%' || LOWER({field}) || '%')")
+        params.append(clean_stakeholder)
+        conditions.append(f"LOWER({field}) LIKE ('%' || LOWER(?) || '%')")
+        params.append(clean_stakeholder)
+
+        if extra_listing_ids:
+            placeholders = ",".join(["?" for _ in extra_listing_ids])
+            conditions.append(f"listing_id IN ({placeholders})")
+            params.extend(extra_listing_ids)
+
+        for en in extra_names:
+            conditions.append(f"LOWER({field}) LIKE LOWER(?)")
+            params.append(f"%{en}%")
+
+        where_clauses.append(f"({' OR '.join(conditions)})")
+    elif normalized_role in {"farmer", "customer"}:
+        # If no stakeholder name was supplied, do not leak other users' orders
+        where_clauses.append("1 = 0")
+    elif normalized_role == "logistics":
+        # Logistics sees all network orders to manage dispatches, or can filter by carrier name
+        if stakeholder and stakeholder.strip() and stakeholder.lower() not in {"logistics", "all", "logistics partner", "fleet view"}:
+            where_clauses.append("(status = 'Assigned' OR LOWER(logistics_name) LIKE LOWER(?))")
+            params.append(f"%{stakeholder.strip()}%")
+
+    query = "SELECT * FROM delivery_updates"
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+    query += " ORDER BY updated_at DESC, id DESC"
+    with get_db_connection() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+
+def accept_delivery(
+    reference: str,
+    logistics_id: Optional[int] = None,
+    logistics_name: str = "",
+    vehicle_number: str = "",
+    current_location: str = ""
+) -> Optional[Dict[str, Any]]:
+    """Claims an unassigned delivery and sets driver and initial location."""
+    if logistics_id is None and not logistics_name.strip():
+        raise ValueError("A logistics partner identity is required")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        existing = cursor.execute("SELECT * FROM delivery_updates WHERE reference = ?", (reference.strip(),)).fetchone()
+        if not existing:
+            return None
+        loc = current_location.strip() or f"Carrier {logistics_name.strip()} dispatched to farm gate for pickup"
+        veh = vehicle_number.strip() or existing["vehicle_number"] or "GJ-01-ET-8412"
+        cursor.execute(
+            """UPDATE delivery_updates
+               SET status = 'Accepted', logistics_id = COALESCE(?, logistics_id),
+                   logistics_name = CASE WHEN ? <> '' THEN ? ELSE logistics_name END,
+                   vehicle_number = ?,
+                   current_location = ?,
+                   accepted_at = ?, updated_at = ?
+               WHERE reference = ? AND status = 'Assigned'""",
+            (logistics_id, logistics_name.strip(), logistics_name.strip(), veh, loc, now, now, reference.strip()),
+        )
+        conn.commit()
+        row = cursor.execute("SELECT * FROM delivery_updates WHERE reference = ?", (reference.strip(),)).fetchone()
+        return dict(row) if row else None
+
+
+def update_delivery_status(
+    reference: str,
+    status: str,
+    current_location: Optional[str] = None,
+    eta: Optional[str] = None,
+    vehicle_number: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Updates a delivery milestone and/or real-time location checkpoint."""
+    normalized_status = status.strip().title() if status else ""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        row = cursor.execute("SELECT * FROM delivery_updates WHERE reference = ?", (reference.strip(),)).fetchone()
+        if not row:
+            return None
+
+        current_status = row["status"]
+        new_status = normalized_status if normalized_status else current_status
+
+        if new_status not in DELIVERY_STATUSES:
+            raise ValueError(f"Invalid delivery status: {new_status}")
+
+        if new_status != current_status and DELIVERY_STATUS_ORDER[new_status] < DELIVERY_STATUS_ORDER.get(current_status, 0):
+            raise ValueError("Delivery status cannot move backwards")
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Determine location note
+        if current_location is not None and str(current_location).strip():
+            new_location = clean_text(str(current_location).strip())
+        elif new_status != current_status:
+            # Default descriptive checkpoint based on milestone
+            if new_status == "Picked Up":
+                new_location = f"Produce loaded at {row['pickup_location']}; departing for {row['destination']}"
+            elif new_status == "In Transit":
+                new_location = f"In transit on highway corridor towards {row['destination']}"
+            elif new_status == "Delivered":
+                new_location = f"Successfully delivered to {row['buyer_name']} at {row['destination']}"
+            else:
+                new_location = row["current_location"] or f"Active at {row['pickup_location']}"
+        else:
+            new_location = row["current_location"]
+
+        new_eta = clean_text(eta) if eta is not None else row["eta"]
+        new_veh = clean_text(vehicle_number) if vehicle_number is not None else row["vehicle_number"]
+
+        cursor.execute(
+            """UPDATE delivery_updates
+               SET status = ?, current_location = ?, eta = ?, vehicle_number = ?, updated_at = ?
+               WHERE reference = ?""",
+            (new_status, new_location, new_eta, new_veh, now, reference.strip())
+        )
+        conn.commit()
+        updated_row = cursor.execute("SELECT * FROM delivery_updates WHERE reference = ?", (reference.strip(),)).fetchone()
+        return dict(updated_row) if updated_row else None
+
+
+def seed_delivery_updates_if_empty() -> None:
+    """Provides initial shared live deliveries so each portal has connected status data."""
+    with get_db_connection() as conn:
+        if conn.execute("SELECT COUNT(*) FROM delivery_updates").fetchone()[0]:
+            return
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            """
+            INSERT INTO delivery_updates
+                (reference, crop, quantity_kg, farmer_name, buyer_name, logistics_name,
+                 pickup_location, destination, status, updated_at, current_location, vehicle_number, eta)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ADH-1001", "Tomato", 500, "Gujarat Agro Collective",
+                "FreshBasket Retail", "ABC Logistics", "Gondal Farm Gate",
+                "Ahmedabad Distribution Hub", "In Transit", now,
+                "En route on SG Highway (near Prahlad Nagar)", "GJ-01-ET-8412", "Today 03:30 PM"
+            ),
+        )
+        conn.commit()
+
+
 def seed_logistics_fleet_if_empty():
     """Pre-populates verified logistics partners with Reliability Scores."""
     with get_db_connection() as conn:
@@ -735,3 +1098,4 @@ def seed_logistics_fleet_if_empty():
 # Seed initial genuine dataset listings & fleet
 seed_from_live_dataset(force=False)
 seed_logistics_fleet_if_empty()
+seed_delivery_updates_if_empty()

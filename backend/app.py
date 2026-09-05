@@ -64,7 +64,14 @@ from marketplace_db import (
     pledge_to_community_pool,
     get_pre_harvest_bookings,
     get_logistics_fleet,
-    register_logistics_partner
+    register_logistics_partner,
+    create_user,
+    authenticate_user,
+    create_delivery_assignment,
+    get_delivery_updates,
+    get_delivery_by_reference,
+    accept_delivery,
+    update_delivery_status,
 )
 from markup_detector import analyze_price_markup, get_live_commodity_benchmark
 from ai_engine import (
@@ -89,6 +96,123 @@ DIST_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "frontend", "dist"))
 app = Flask(__name__, static_folder=DIST_DIR, static_url_path="")
 # Enable CORS for all routes (allows React frontend on port 5173 or any dev port)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+
+@app.route("/api/auth/register", methods=["POST"])
+def api_register():
+    """Creates a farmer, customer, or logistics stakeholder account."""
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        user = create_user(
+            name=payload.get("name", ""),
+            email=payload.get("email", ""),
+            password=payload.get("password", ""),
+            role=payload.get("role", ""),
+            phone=payload.get("phone", ""),
+            location=payload.get("location", ""),
+            organization=payload.get("organization", ""),
+        )
+        return jsonify({"success": True, "user": user}), 201
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Account registration failed: %s", exc)
+        return jsonify({"success": False, "error": "Unable to create account"}), 500
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_login():
+    """Authenticates a stakeholder account without exposing its password hash."""
+    payload = request.get_json(force=True, silent=True) or {}
+    email = payload.get("email", "").strip()
+    password = payload.get("password", "")
+    if not email or not password:
+        return jsonify({"success": False, "error": "Email and password are required"}), 400
+    user = authenticate_user(email, password)
+    if not user:
+        return jsonify({"success": False, "error": "Invalid email or password"}), 401
+    return jsonify({"success": True, "user": user})
+
+
+@app.route("/api/deliveries", methods=["GET", "POST"])
+def api_deliveries():
+    """List assignments or create one after a farmer/customer match."""
+    if request.method == "GET":
+        role = request.args.get("role")
+        stakeholder = request.args.get("stakeholder") or request.args.get("name")
+        all_deliveries = request.args.get("all", "").lower() in ("true", "1")
+        # ONLY logistics or unauthenticated overview can see all deliveries;
+        # farmer and customer must strictly see only their own orders!
+        if (all_deliveries or role == "logistics") and role not in ("farmer", "customer"):
+            return jsonify({"success": True, "deliveries": get_delivery_updates(role=None, stakeholder=None)})
+        return jsonify({"success": True, "deliveries": get_delivery_updates(role, stakeholder)})
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        qty = payload.get("quantity_kg", payload.get("quantity", 0))
+        dest = payload.get("destination", payload.get("delivery_location", ""))
+        assignment = create_delivery_assignment(
+            crop=payload.get("crop", ""),
+            quantity_kg=float(qty),
+            farmer_name=payload.get("farmer_name", ""),
+            buyer_name=payload.get("buyer_name", ""),
+            pickup_location=payload.get("pickup_location", ""),
+            destination=dest,
+            listing_id=int(payload["listing_id"]) if payload.get("listing_id") is not None else None,
+            demand_id=int(payload["demand_id"]) if payload.get("demand_id") is not None else None,
+            current_location=payload.get("current_location", ""),
+            vehicle_number=payload.get("vehicle_number", ""),
+            eta=payload.get("eta", "")
+        )
+        return jsonify({"success": True, "delivery": assignment}), 201
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/deliveries/<reference>", methods=["GET"])
+def api_get_delivery(reference: str):
+    """Fetches a single delivery record by its tracking reference code."""
+    delivery = get_delivery_by_reference(reference)
+    if not delivery:
+        return jsonify({"success": False, "error": "Delivery not found"}), 404
+    return jsonify({"success": True, "delivery": delivery})
+
+
+@app.route("/api/deliveries/<reference>/accept", methods=["POST"])
+def api_accept_delivery(reference: str):
+    """Allows a logistics partner to claim an unassigned delivery and set initial carrier details."""
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        delivery = accept_delivery(
+            reference,
+            logistics_id=int(payload["logistics_id"]) if payload.get("logistics_id") is not None else None,
+            logistics_name=payload.get("logistics_name", ""),
+            vehicle_number=payload.get("vehicle_number", ""),
+            current_location=payload.get("current_location", "")
+        )
+        if not delivery:
+            return jsonify({"success": False, "error": "Delivery is already claimed or not found"}), 409
+        return jsonify({"success": True, "delivery": delivery})
+    except (TypeError, ValueError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+@app.route("/api/deliveries/<reference>/status", methods=["PATCH", "POST"])
+def api_delivery_status(reference: str):
+    """Lets the logistics stakeholder publish the next delivery milestone or real-time location checkpoint."""
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        delivery = update_delivery_status(
+            reference=reference,
+            status=payload.get("status", ""),
+            current_location=payload.get("current_location"),
+            eta=payload.get("eta"),
+            vehicle_number=payload.get("vehicle_number")
+        )
+        if not delivery:
+            return jsonify({"success": False, "error": "Delivery not found"}), 404
+        return jsonify({"success": True, "delivery": delivery})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
 
 
 # -----------------------------------------------------------------------------

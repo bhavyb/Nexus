@@ -133,6 +133,12 @@ class NexusBackendTestCase(unittest.TestCase):
         ids = [l["id"] for l in listings]
         self.assertIn(listing_id, ids)
 
+        # Clean up so test listing never pollutes DB
+        from marketplace_db import get_db_connection
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM listings WHERE id = ?", (listing_id,))
+            conn.commit()
+
     def test_markup_detector(self):
         # Normal
         r_normal = analyze_price_markup(20.0, 30.0, "Onion")

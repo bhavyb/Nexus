@@ -21,20 +21,38 @@ import {
   Calendar,
   Clock,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Truck,
+  ArrowRight,
+  Check
 } from 'lucide-react';
 import { getCropDisplayName, getCropGujaratiOnly } from '../utils/cropTranslations';
+import { getCropImage } from '../utils/cropImages';
 import TraceabilityModal from './TraceabilityModal.jsx';
+import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
 
-export default function MarketplaceModule({ commodities = [], locationsData = { states: [], districts: [], markets: [] } }) {
-  const [marketSubTab, setMarketSubTab] = useState('direct'); // 'direct', 'bulk', 'community'
+export default function MarketplaceModule({ user, commodities = [], locationsData = { states: [], districts: [], markets: [] } }) {
+  const [marketSubTab, setMarketSubTab] = useState('direct'); // 'direct', 'bulk', 'community', 'deliveries'
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterCrop, setFilterCrop] = useState('');
   const [filterLocation, setFilterLocation] = useState('');
   const [selectedRegionDropdown, setSelectedRegionDropdown] = useState('');
-  const [showModal, setShowModal] = useState(false);
   const [selectedTraceListing, setSelectedTraceListing] = useState(null);
+
+  // Buyer Order & Delivery Booking state
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [orderListing, setOrderListing] = useState(null);
+  const [orderFormData, setOrderFormData] = useState({
+    buyer_name: user?.name || '',
+    phone: user?.phone || '+91 98251 44332',
+    quantity_kg: 50,
+    delivery_location: user?.location || 'Navrangpura, Ahmedabad (Gujarat)',
+    notes: ''
+  });
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [orderSuccess, setOrderSuccess] = useState(null);
+  const [orderError, setOrderError] = useState(null);
 
   // Bulk demands state
   const [bulkDemands, setBulkDemands] = useState([]);
@@ -44,25 +62,6 @@ export default function MarketplaceModule({ commodities = [], locationsData = { 
   const [communityPools, setCommunityPools] = useState([]);
   const [loadingPools, setLoadingPools] = useState(false);
   const [pledgePushed, setPledgePushed] = useState({});
-
-  // Form State
-  const [formData, setFormData] = useState({
-    farmer_name: '',
-    phone: '',
-    crop: commodities[0] || 'Onion',
-    variety: '',
-    quantity_kg: '',
-    asking_price_kg: '',
-    location: 'Junagadh, Gujarat',
-    notes: ''
-  });
-
-  // Reference Fair Price fetched from Module 1 for this crop
-  const [referenceFairPrice, setReferenceFairPrice] = useState(null);
-  const [loadingFairRef, setLoadingFairRef] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [formSuccess, setFormSuccess] = useState(null);
-  const [formError, setFormError] = useState(null);
 
   const fetchListings = () => {
     setLoading(true);
@@ -113,85 +112,6 @@ export default function MarketplaceModule({ commodities = [], locationsData = { 
     fetchCommunityPools();
   }, [filterCrop, filterLocation]);
 
-  // When farmer selects a crop in the listing form, fetch fair price benchmark
-  useEffect(() => {
-    if (!formData.crop) return;
-    setLoadingFairRef(true);
-    fetch(`/api/mandis?commodity=${encodeURIComponent(formData.crop)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.mandis.length > 0) {
-          const defaultMandi = data.mandis[0].market;
-          return fetch(`/api/fair-price?crop=${encodeURIComponent(formData.crop)}&mandi=${encodeURIComponent(defaultMandi)}`);
-        }
-        return null;
-      })
-      .then((res) => (res ? res.json() : null))
-      .then((res) => {
-        if (res && res.success && res.data) {
-          setReferenceFairPrice(res.data);
-          if (res.data.current_modal_price_kg) {
-            setFormData((prev) => ({
-              ...prev,
-              asking_price_kg: res.data.current_modal_price_kg
-            }));
-          }
-        } else {
-          setReferenceFairPrice(null);
-        }
-      })
-      .catch(() => setReferenceFairPrice(null))
-      .finally(() => setLoadingFairRef(false));
-  }, [formData.crop]);
-
-  const handleSubmitListing = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setFormError(null);
-
-    const payload = {
-      ...formData,
-      quantity_kg: Number(formData.quantity_kg),
-      asking_price_kg: Number(formData.asking_price_kg),
-      fair_price_min: referenceFairPrice?.fair_price_band_kg?.min || 0,
-      fair_price_max: referenceFairPrice?.fair_price_band_kg?.max || 0,
-      mandi_reference: referenceFairPrice?.mandi || ''
-    };
-
-    try {
-      const res = await fetch('/api/listings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-
-      if (data.success) {
-        setFormSuccess('फसल लिस्टिंग सफलतापूर्वक प्रकाशित हुई! (Listing published successfully)');
-        fetchListings();
-        setTimeout(() => {
-          setShowModal(false);
-          setFormSuccess(null);
-          setFormData({
-            farmer_name: '',
-            phone: '',
-            crop: commodities[0] || 'Onion',
-            variety: '',
-            quantity_kg: '',
-            asking_price_kg: '',
-            location: 'Junagadh, Gujarat',
-            notes: ''
-          });
-        }, 1200);
-      } else {
-        setFormError(data.error || 'Failed to create listing');
-      }
-    } catch (err) {
-      setFormError('Cannot connect to Nexus backend');
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const handlePledge = async (poolId) => {
     try {
@@ -210,113 +130,204 @@ export default function MarketplaceModule({ commodities = [], locationsData = { 
     }
   };
 
+  // Synchronize buyer name from logged in user
+  useEffect(() => {
+    if (user?.name) {
+      setOrderFormData((prev) => ({
+        ...prev,
+        buyer_name: user.name,
+        phone: user.phone || prev.phone,
+        delivery_location: user.location || prev.delivery_location
+      }));
+    }
+  }, [user]);
+
+  const handleOpenOrderModal = (listing) => {
+    setOrderListing(listing);
+    setOrderFormData((prev) => ({
+      ...prev,
+      quantity_kg: Math.min(50, listing.quantity_kg),
+      notes: `Order for ${listing.crop} (${listing.variety || 'Standard'}) from ${listing.farmer_name}`
+    }));
+    setOrderSuccess(null);
+    setOrderError(null);
+    setShowOrderModal(true);
+  };
+
+  const handleConfirmOrder = async (e) => {
+    e.preventDefault();
+    if (!orderListing) return;
+    setOrderSubmitting(true);
+    setOrderError(null);
+
+    const payload = {
+      crop: orderListing.crop,
+      quantity_kg: Number(orderFormData.quantity_kg),
+      farmer_name: orderListing.farmer_name,
+      buyer_name: orderFormData.buyer_name || 'Verified Buyer',
+      pickup_location: orderListing.location,
+      destination: orderFormData.delivery_location,
+      listing_id: orderListing.id,
+      current_location: `Order Placed - Awaiting carrier dispatch at ${orderListing.location}`,
+      vehicle_number: 'GJ-01-ET-8412',
+      eta: 'Estimated 2-4 hours'
+    };
+
+    try {
+      const res = await fetch('/api/deliveries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setOrderSuccess(data.delivery);
+      } else {
+        setOrderError(data.error || 'Failed to create delivery order');
+      }
+    } catch (err) {
+      setOrderError('Cannot connect to Nexus logistics backend');
+    } finally {
+      setOrderSubmitting(false);
+    }
+  };
+
   const handleRegionChange = (e) => {
     const val = e.target.value;
     setSelectedRegionDropdown(val);
     setFilterLocation(val);
   };
 
-  const isAskingPriceLow =
-    referenceFairPrice &&
-    formData.asking_price_kg &&
-    Number(formData.asking_price_kg) < referenceFairPrice.fair_price_band_kg.min;
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Top Banner & Multi-Buyer Sub-Tabs */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+      {/* Visual Marketplace Hero with Photo Backdrop */}
+      <div className="marketplace-hero">
+        <div style={{ maxWidth: '650px', zIndex: 2 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem', fontWeight: 800, color: '#DDA15E', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>
+            <Sparkles size={15} /> Direct Mandi-to-Market Exchange
+          </div>
+          <h1 style={{ fontSize: '2.1rem', fontWeight: 800, color: '#FEFAE0', margin: '2px 0 8px 0', lineHeight: 1.15 }}>
+            Direct Farm Produce Marketplace
+          </h1>
+          <div style={{ fontSize: '0.92rem', color: '#EFF3DF', lineHeight: 1.4 }}>
+            Zero middleman commission. Connects verified farmgate supply directly with individual buyers, HoReCa bulk procurement, and housing society buying pools.
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-end', zIndex: 2 }}>
+          <div style={{ background: 'rgba(40, 54, 24, 0.82)', border: '1px solid rgba(221, 161, 94, 0.45)', backdropFilter: 'blur(8px)', padding: '12px 18px', borderRadius: '14px', color: '#FEFAE0', textAlign: 'right' }}>
+            <div style={{ fontSize: '0.72rem', color: '#DDA15E', fontWeight: 700, textTransform: 'uppercase' }}>Verified Farmgate Supply</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>{listings.length} Lots Available</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4 Multi-Buyer Sub-Tabs Bar */}
       <div
         style={{
           background: 'white',
-          padding: '20px 24px',
-          borderRadius: 'var(--radius-lg)',
+          padding: '6px 8px',
+          borderRadius: 'var(--radius-md)',
           border: '1px solid var(--color-border)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
-          gap: '16px'
+          gap: '12px'
         }}
       >
-        <div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', fontWeight: 700, color: 'var(--color-crop)', textTransform: 'uppercase' }}>
-            <Sparkles size={14} /> Multi-Stakeholder Marketplace
-          </div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '4px 0 0 0' }}>
-            Direct Marketplace & Smart Buyer Channels
-          </h2>
-          <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-            Zero middleman commission: connects farmgate supply with consumers, bulk HoReCa buyers, and society pools.
-          </div>
-        </div>
-
-        {/* 3 Sub-Tabs Switcher */}
         <div
           style={{
             background: 'var(--color-bg-subtle)',
             padding: '4px',
-            borderRadius: '12px',
+            borderRadius: '10px',
             display: 'flex',
-            gap: '4px'
+            gap: '4px',
+            flexWrap: 'wrap'
           }}
         >
           <button
             onClick={() => setMarketSubTab('direct')}
             style={{
-              padding: '8px 14px',
+              padding: '8px 16px',
               borderRadius: '8px',
               border: 'none',
-              background: marketSubTab === 'direct' ? 'white' : 'transparent',
-              color: marketSubTab === 'direct' ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)',
-              fontWeight: 700,
-              fontSize: '0.8rem',
+              background: marketSubTab === 'direct' ? 'var(--palette-forest)' : 'transparent',
+              color: marketSubTab === 'direct' ? '#FEFAE0' : 'var(--color-text-secondary)',
+              fontWeight: 800,
+              fontSize: '0.84rem',
               cursor: 'pointer',
               boxShadow: marketSubTab === 'direct' ? 'var(--shadow-sm)' : 'none',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px'
+              gap: '6px',
+              transition: 'all 0.15s ease'
             }}
           >
-            <ShoppingBag size={14} color="var(--color-crop)" /> Farmgate Listings ({listings.length})
+            <ShoppingBag size={15} color={marketSubTab === 'direct' ? '#FEFAE0' : 'var(--palette-moss)'} /> Farmgate Listings ({listings.length})
           </button>
 
           <button
             onClick={() => setMarketSubTab('bulk')}
             style={{
-              padding: '8px 14px',
+              padding: '8px 16px',
               borderRadius: '8px',
               border: 'none',
-              background: marketSubTab === 'bulk' ? 'white' : 'transparent',
-              color: marketSubTab === 'bulk' ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)',
-              fontWeight: 700,
-              fontSize: '0.8rem',
+              background: marketSubTab === 'bulk' ? 'var(--palette-forest)' : 'transparent',
+              color: marketSubTab === 'bulk' ? '#FEFAE0' : 'var(--color-text-secondary)',
+              fontWeight: 800,
+              fontSize: '0.84rem',
               cursor: 'pointer',
               boxShadow: marketSubTab === 'bulk' ? 'var(--shadow-sm)' : 'none',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px'
+              gap: '6px',
+              transition: 'all 0.15s ease'
             }}
           >
-            <Building2 size={14} color="#2563EB" /> Bulk Buyers ({bulkDemands.length})
+            <Building2 size={15} color={marketSubTab === 'bulk' ? '#FEFAE0' : '#2563EB'} /> Bulk Buyers ({bulkDemands.length})
           </button>
 
           <button
             onClick={() => setMarketSubTab('community')}
             style={{
-              padding: '8px 14px',
+              padding: '8px 16px',
               borderRadius: '8px',
               border: 'none',
-              background: marketSubTab === 'community' ? 'white' : 'transparent',
-              color: marketSubTab === 'community' ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)',
-              fontWeight: 700,
-              fontSize: '0.8rem',
+              background: marketSubTab === 'community' ? 'var(--palette-forest)' : 'transparent',
+              color: marketSubTab === 'community' ? '#FEFAE0' : 'var(--color-text-secondary)',
+              fontWeight: 800,
+              fontSize: '0.84rem',
               cursor: 'pointer',
               boxShadow: marketSubTab === 'community' ? 'var(--shadow-sm)' : 'none',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px'
+              gap: '6px',
+              transition: 'all 0.15s ease'
             }}
           >
-            <Users size={14} color="var(--color-turmeric)" /> Smart Community Pools ({communityPools.length})
+            <Users size={15} color={marketSubTab === 'community' ? '#FEFAE0' : 'var(--palette-wheat)'} /> Smart Community Pools ({communityPools.length})
+          </button>
+
+          <button
+            onClick={() => setMarketSubTab('deliveries')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: 'none',
+              background: marketSubTab === 'deliveries' ? 'var(--palette-forest)' : 'transparent',
+              color: marketSubTab === 'deliveries' ? '#FEFAE0' : 'var(--color-text-secondary)',
+              fontWeight: 800,
+              fontSize: '0.84rem',
+              cursor: 'pointer',
+              boxShadow: marketSubTab === 'deliveries' ? 'var(--shadow-sm)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Truck size={15} color={marketSubTab === 'deliveries' ? '#FEFAE0' : 'var(--palette-terracotta)'} /> Orders & Live Tracking
           </button>
         </div>
       </div>
@@ -376,16 +387,6 @@ export default function MarketplaceModule({ commodities = [], locationsData = { 
                 ))}
               </datalist>
             </div>
-
-            <div style={{ marginLeft: 'auto' }}>
-              <button
-                className="btn-primary"
-                onClick={() => setShowModal(true)}
-                style={{ padding: '8px 16px', fontSize: '0.82rem' }}
-              >
-                <PlusCircle size={15} /> Post Harvest (फसल लिस्ट करें)
-              </button>
-            </div>
           </div>
 
           {/* Cards Grid */}
@@ -404,119 +405,149 @@ export default function MarketplaceModule({ commodities = [], locationsData = { 
                 const isPre = l.is_pre_harvest === 1;
 
                 return (
-                  <div
-                    key={l.id}
-                    className="nexus-card"
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      borderTop: `4px solid ${isPre ? '#2563EB' : 'var(--color-crop)'}`
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span
-                          style={{
-                            background: isPre ? '#EFF6FF' : 'var(--color-crop-light)',
-                            color: isPre ? '#2563EB' : 'var(--color-crop)',
-                            fontSize: '0.72rem',
-                            fontWeight: 700,
-                            padding: '3px 8px',
-                            borderRadius: '10px'
-                          }}
-                        >
-                          {isPre ? '📅 Pre-Harvest Commitment' : '✓ Ready Harvest'}
-                        </span>
+                  <div key={l.id} className="produce-card">
+                    {/* Visual Media Header with Real Crop Photo */}
+                    <div className="produce-card-media">
+                      <img
+                        src={getCropImage(l.crop)}
+                        alt={l.crop}
+                        className="produce-card-img"
+                        loading="lazy"
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80';
+                        }}
+                      />
 
-                        <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
-                          Batch: {l.qr_code_id || `NX-${l.id.toString().padStart(4, '0')}`}
-                        </span>
-                      </div>
-
-                      <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
-                        {getCropDisplayName(l.crop)}
-                      </h3>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                        Variety: <strong>{l.variety || 'Standard'}</strong> • Farmer: <strong>{l.farmer_name}</strong>
-                      </div>
-
-                      <div
+                      <span
+                        className="produce-card-badge-top-left"
                         style={{
-                          margin: '12px 0',
-                          background: 'var(--color-bg-subtle)',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '10px 12px',
-                          display: 'flex',
-                          justifyContent: 'space-between'
+                          background: isPre ? 'rgba(37, 99, 235, 0.92)' : 'rgba(40, 54, 24, 0.88)',
+                          color: '#FEFAE0'
                         }}
                       >
-                        <div>
-                          <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-                            Quantity
-                          </div>
-                          <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
-                            {l.quantity_kg.toLocaleString()} kg
-                          </div>
-                        </div>
+                        {isPre ? '📅 Pre-Harvest' : '✓ Fresh Harvest'}
+                      </span>
 
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-                            Asking Price
-                          </div>
-                          <div style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-crop)' }}>
-                            ₹{l.asking_price_kg.toFixed(2)}<span style={{ fontSize: '0.75rem' }}>/kg</span>
-                          </div>
-                        </div>
+                      <span className="produce-card-badge-top-right">
+                        {l.qr_code_id || `NX-${l.id.toString().padStart(4, '0')}`}
+                      </span>
+
+                      <div className="produce-card-price-overlay">
+                        ₹{l.asking_price_kg.toFixed(2)}
+                        <span style={{ fontSize: '0.72rem', opacity: 0.9 }}>/kg</span>
                       </div>
-
-                      <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginBottom: '4px' }}>
-                        <MapPin size={12} style={{ display: 'inline', marginRight: '4px' }} />
-                        {l.location}
-                      </div>
-
-                      {l.notes && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: '10px' }}>
-                          "{l.notes}"
-                        </div>
-                      )}
                     </div>
 
-                    {/* Action Bar */}
-                    <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '12px', display: 'flex', gap: '8px' }}>
-                      <button
-                        className="btn-secondary"
-                        onClick={() => setSelectedTraceListing(l)}
-                        style={{
-                          flex: 1,
-                          padding: '7px 8px',
-                          fontSize: '0.74rem',
-                          justifyContent: 'center',
-                          color: 'var(--color-soil)'
-                        }}
-                      >
-                        <QrCode size={14} /> Farm-to-Fork QR
-                      </button>
+                    {/* Produce Card Content */}
+                    <div className="produce-card-content">
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                          <div>
+                            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                              {getCropDisplayName(l.crop)}
+                            </h3>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                              Variety: <strong>{l.variety || 'Desi Standard'}</strong>
+                            </div>
+                          </div>
 
-                      <a
-                        href={waUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn-primary"
-                        style={{
-                          padding: '7px 12px',
-                          fontSize: '0.75rem',
-                          background: '#25D366',
-                          borderColor: '#25D366',
-                          textDecoration: 'none',
-                          color: 'white',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px'
-                        }}
-                      >
-                        <MessageCircle size={14} /> WhatsApp
-                      </a>
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', display: 'block', textTransform: 'uppercase', fontWeight: 700 }}>Farmer</span>
+                            <strong style={{ fontSize: '0.82rem', color: 'var(--palette-forest)' }}>{l.farmer_name}</strong>
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            margin: '12px 0',
+                            background: 'var(--color-bg-subtle)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '10px 12px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                              Lot Quantity
+                            </div>
+                            <div style={{ fontSize: '1.18rem', fontWeight: 800, color: 'var(--palette-forest)' }}>
+                              {l.quantity_kg.toLocaleString()} kg
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                              Total Lot Value
+                            </div>
+                            <div style={{ fontSize: '1.12rem', fontWeight: 800, color: 'var(--palette-terracotta)' }}>
+                              ₹{(l.quantity_kg * l.asking_price_kg).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <MapPin size={13} color="var(--palette-terracotta)" />
+                          <span>{l.location}</span>
+                        </div>
+
+                        {l.notes && (
+                          <div style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: '10px' }}>
+                            "{l.notes}"
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action Bar */}
+                      <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <button
+                          className="btn-primary"
+                          onClick={() => handleOpenOrderModal(l)}
+                          style={{
+                            width: '100%',
+                            padding: '9px 12px',
+                            fontSize: '0.84rem'
+                          }}
+                        >
+                          <Truck size={15} /> Buy & Book Delivery (ખરીદો અને ડિલિવરી)
+                        </button>
+
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="btn-secondary"
+                            onClick={() => setSelectedTraceListing(l)}
+                            style={{
+                              flex: 1,
+                              padding: '6px 8px',
+                              fontSize: '0.74rem',
+                              justifyContent: 'center',
+                              color: 'var(--color-soil)'
+                            }}
+                          >
+                            <QrCode size={13} /> Farm-to-Fork QR
+                          </button>
+
+                          <a
+                            href={waUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-secondary"
+                            style={{
+                              padding: '6px 10px',
+                              fontSize: '0.74rem',
+                              color: '#15803D',
+                              textDecoration: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <MessageCircle size={13} /> WhatsApp
+                          </a>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -767,158 +798,48 @@ export default function MarketplaceModule({ commodities = [], locationsData = { 
         </div>
       )}
 
-      {/* Modal: Post Listing */}
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div
-            className="modal-content"
-            style={{ maxWidth: '560px', maxHeight: '90vh', overflowY: 'auto' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: 'var(--color-soil-dark)' }}>
-                Post Your Harvest (अपनी फसल लिस्ट करें)
-              </h3>
-              <button
-                onClick={() => setShowModal(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem' }}
-              >
-                ✕
-              </button>
+      {/* ------------------------------------------------------------- */}
+      {/* SUB-TAB 4: LIVE DELIVERIES & ORDER TRACKING                   */}
+      {/* ------------------------------------------------------------- */}
+      {marketSubTab === 'deliveries' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {orderSuccess && (
+            <div
+              className="nexus-card"
+              style={{
+                background: 'linear-gradient(135deg, #F0FDF4 0%, #EFF6FF 100%)',
+                border: '1.5px solid var(--color-crop-border)',
+                padding: '16px 20px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ background: 'var(--color-crop)', color: 'white', padding: '8px', borderRadius: '50%', display: 'flex' }}>
+                  <Check size={20} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
+                    Order Successfully Placed! (ઓર્ડર બુક થઈ ગયો)
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                    Reference: <strong>{orderSuccess.reference}</strong> • Tracking active in real-time below
+                  </div>
+                </div>
+              </div>
+              <span style={{ fontSize: '0.75rem', background: '#DCFCE7', color: 'var(--color-crop)', padding: '4px 10px', borderRadius: '12px', fontWeight: 700 }}>
+                Status: {orderSuccess.status}
+              </span>
             </div>
+          )}
 
-            {formSuccess && (
-              <div className="nexus-alert success" style={{ marginBottom: '14px' }}>
-                <CheckCircle2 size={16} /> {formSuccess}
-              </div>
-            )}
-
-            <form onSubmit={handleSubmitListing} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div className="form-group">
-                  <label className="form-label">Farmer Name *</label>
-                  <input
-                    type="text"
-                    className="nexus-input"
-                    required
-                    value={formData.farmer_name}
-                    onChange={(e) => setFormData({ ...formData, farmer_name: e.target.value })}
-                    placeholder="e.g. Sureshbhai Patel"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Phone *</label>
-                  <input
-                    type="text"
-                    className="nexus-input"
-                    required
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="e.g. 98251 34812"
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div className="form-group">
-                  <label className="form-label">Crop *</label>
-                  <select
-                    className="nexus-select"
-                    value={formData.crop}
-                    onChange={(e) => setFormData({ ...formData, crop: e.target.value })}
-                  >
-                    {commodities.map((c) => (
-                      <option key={c} value={c}>
-                        {getCropDisplayName(c)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Variety</label>
-                  <input
-                    type="text"
-                    className="nexus-input"
-                    value={formData.variety}
-                    onChange={(e) => setFormData({ ...formData, variety: e.target.value })}
-                    placeholder="e.g. GG-20, Sharbati"
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div className="form-group">
-                  <label className="form-label">Quantity (kg) *</label>
-                  <input
-                    type="number"
-                    className="nexus-input"
-                    required
-                    min="50"
-                    value={formData.quantity_kg}
-                    onChange={(e) => setFormData({ ...formData, quantity_kg: e.target.value })}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Asking Price (₹/kg) *</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    className="nexus-input"
-                    required
-                    value={formData.asking_price_kg}
-                    onChange={(e) => setFormData({ ...formData, asking_price_kg: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Location (Mandi / District) *</label>
-                <input
-                  type="text"
-                  className="nexus-input"
-                  list="marketplace-post-locations"
-                  placeholder="Type or select Mandi / District..."
-                  required
-                  value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                />
-                <datalist id="marketplace-post-locations">
-                  {locationsData?.markets?.slice(0, 300).map((m) => (
-                    <option key={m.display} value={m.display} />
-                  ))}
-                  {locationsData?.districts?.slice(0, 100).map((d) => (
-                    <option key={d.display} value={d.display} />
-                  ))}
-                </datalist>
-                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                  ✓ Real Agmarknet Mandis & Districts available ({locationsData?.markets?.length || 1204} markets)
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Notes</label>
-                <textarea
-                  className="nexus-input"
-                  rows="2"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="e.g. Dry skin cured, direct farmgate loading"
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
-                <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" disabled={submitting}>
-                  {submitting ? 'Publishing...' : 'Publish Listing'}
-                </button>
-              </div>
-            </form>
-          </div>
+          <DeliveryStatusPanel
+            role="customer"
+            stakeholder={user?.name || orderFormData.buyer_name || 'Customer'}
+          />
         </div>
       )}
 
@@ -928,6 +849,219 @@ export default function MarketplaceModule({ commodities = [], locationsData = { 
           listing={selectedTraceListing}
           onClose={() => setSelectedTraceListing(null)}
         />
+      )}
+
+      {/* Modal: Buy Produce & Order Logistics Delivery */}
+      {showOrderModal && orderListing && (
+        <div className="modal-overlay" onClick={() => setShowOrderModal(false)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: '580px', maxHeight: '90vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--color-crop)', textTransform: 'uppercase' }}>
+                  Direct Farm-to-Doorstep Purchase
+                </div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: '2px 0 0 0', color: 'var(--color-soil-dark)' }}>
+                  Buy from Farmer & Book Logistics
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowOrderModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {orderSuccess ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '12px 0' }}>
+                <div style={{ textAlign: 'center', padding: '20px', background: '#F0FDF4', borderRadius: '12px', border: '1px solid #BBF7D0' }}>
+                  <div style={{ width: '48px', height: '48px', background: 'var(--color-crop)', color: 'white', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px auto' }}>
+                    <Check size={28} />
+                  </div>
+                  <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                    Order Confirmed & Logistics Dispatched!
+                  </h4>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                    તમારો ઓર્ડર સફળતાપૂર્વક બુક થયો છે અને ડિલિવરી શરૂ થઈ ગઈ છે.
+                  </div>
+                  <div style={{ display: 'inline-block', margin: '14px 0 6px 0', background: 'white', padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--color-border)', fontFamily: 'monospace', fontWeight: 800, fontSize: '1.05rem', color: 'var(--color-crop)' }}>
+                    {orderSuccess.reference}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                    Carrying <strong>{orderSuccess.quantity_kg} kg {orderSuccess.crop}</strong> from Farmer <strong>{orderSuccess.farmer_name}</strong>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => setShowOrderModal(false)}
+                    style={{ flex: 1, padding: '10px', justifyContent: 'center' }}
+                  >
+                    Close
+                  </button>
+                  <button
+                    className="btn-primary"
+                    onClick={() => {
+                      setShowOrderModal(false);
+                      setMarketSubTab('deliveries');
+                    }}
+                    style={{ flex: 2, padding: '10px', justifyContent: 'center', gap: '6px' }}
+                  >
+                    <Truck size={16} /> Track Live Delivery (લાઈવ ટ્રેકિંગ જુઓ)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleConfirmOrder} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {orderError && (
+                  <div className="nexus-alert danger">
+                    <AlertCircle size={16} /> {orderError}
+                  </div>
+                )}
+
+                {/* Farmer & Crop Summary Banner */}
+                <div
+                  style={{
+                    background: 'var(--color-bg-subtle)',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--color-border)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Farmer & Lot Origin
+                    </div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
+                      {orderListing.farmer_name}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                      <MapPin size={12} /> {orderListing.location}
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Crop & Agreed Rate
+                    </div>
+                    <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-crop)' }}>
+                      {getCropDisplayName(orderListing.crop)}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-soil-dark)' }}>
+                      ₹{orderListing.asking_price_kg}/kg
+                    </div>
+                  </div>
+                </div>
+
+                {/* Buyer Input Fields */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Buyer / Customer Name *</label>
+                    <input
+                      type="text"
+                      className="nexus-input"
+                      required
+                      placeholder="e.g. Ramesh Patel"
+                      value={orderFormData.buyer_name}
+                      onChange={(e) => setOrderFormData({ ...orderFormData, buyer_name: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Contact Phone *</label>
+                    <input
+                      type="tel"
+                      className="nexus-input"
+                      required
+                      placeholder="+91 98251 XXXXX"
+                      value={orderFormData.phone}
+                      onChange={(e) => setOrderFormData({ ...orderFormData, phone: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="form-label">Purchase Quantity (kg) *</label>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                      Available: {orderListing.quantity_kg.toLocaleString()} kg
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    className="nexus-input"
+                    required
+                    min="5"
+                    max={orderListing.quantity_kg}
+                    value={orderFormData.quantity_kg}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, quantity_kg: Math.min(orderListing.quantity_kg, Math.max(1, Number(e.target.value))) })}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Delivery Destination Address / City *</label>
+                  <input
+                    type="text"
+                    className="nexus-input"
+                    required
+                    placeholder="e.g. Shop 14, APMC Market Yard, Ahmedabad"
+                    value={orderFormData.delivery_location}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, delivery_location: e.target.value })}
+                  />
+                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '3px' }}>
+                    Logistics carrier will pick up from the farmer's gate and deliver directly to this address.
+                  </div>
+                </div>
+
+                {/* Price Breakdown Calculation */}
+                <div
+                  style={{
+                    background: '#F9FAFB',
+                    border: '1px dashed #D1D5DB',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    fontSize: '0.82rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>Produce Subtotal ({orderFormData.quantity_kg} kg × ₹{orderListing.asking_price_kg}):</span>
+                    <strong>₹{(Number(orderFormData.quantity_kg) * Number(orderListing.asking_price_kg)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>Shared Logistics & Loading:</span>
+                    <strong style={{ color: 'var(--color-crop)' }}>₹250.00</strong>
+                  </div>
+                  <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', fontWeight: 800 }}>
+                    <span style={{ color: 'var(--color-soil-dark)' }}>Total Payable:</span>
+                    <span style={{ color: 'var(--color-crop)' }}>
+                      ₹{(Number(orderFormData.quantity_kg) * Number(orderListing.asking_price_kg) + 250).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                  <button type="button" className="btn-secondary" onClick={() => setShowOrderModal(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary" disabled={orderSubmitting} style={{ padding: '8px 18px', gap: '6px' }}>
+                    <Truck size={15} /> {orderSubmitting ? 'Booking Delivery...' : 'Confirm Order & Dispatch Logistics'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

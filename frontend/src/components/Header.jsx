@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Sprout, RefreshCw, Database, AlertCircle } from 'lucide-react';
 
-export default function Header({ statusData, onRefreshSuccess }) {
+export default function Header({ statusData, onRefreshSuccess, user, onLogout }) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(null);
 
@@ -40,7 +40,7 @@ export default function Header({ statusData, onRefreshSuccess }) {
           </div>
           <div>
             <div className="brand-title">
-              Nexus
+              annDhara
             </div>
             <div className="brand-tagline">
               AI Market Intelligence & Fair Price Discovery for Indian Farmers
@@ -66,6 +66,13 @@ export default function Header({ statusData, onRefreshSuccess }) {
             <RefreshCw size={14} className={isRefreshing ? 'spin-icon' : ''} />
             <span>{isRefreshing ? 'Pulling Data...' : 'Refresh Data'}</span>
           </button>
+          {user && (
+            <div className="user-menu">
+              <div className="user-avatar">{user.name.charAt(0).toUpperCase()}</div>
+              <div className="user-identity"><strong>{user.name}</strong><span>{user.role === 'customer' ? 'Customer / Buyer' : user.role === 'logistics' ? 'Logistics Partner' : 'Farmer / FPO'}</span></div>
+              <button className="logout-btn" onClick={onLogout}>Sign out</button>
+            </div>
+          )}
         </div>
       </div>
     </header>
