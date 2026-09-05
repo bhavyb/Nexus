@@ -25,7 +25,7 @@ delivery_otp = delivery["delivery_otp"]
 print(f"[OK] Delivery Created: {ref} (Pickup OTP: {pickup_otp}, Delivery OTP: {delivery_otp})")
 
 # 2. Farmer view: sees pickup_otp, delivery_otp is redacted
-res = client.get(f"/api/deliveries/{ref}?role=farmer")
+res = client.get(f"/api/deliveries/{ref}?role=farmer&stakeholder=Ramesh+Patel")
 assert res.status_code == 200
 farmer_data = json.loads(res.data.decode("utf-8"))["delivery"]
 assert farmer_data.get("pickup_otp") == pickup_otp, "Farmer must see pickup_otp"
@@ -33,12 +33,31 @@ assert not farmer_data.get("delivery_otp"), "Farmer must NOT see delivery_otp"
 print("[OK] Farmer View Privacy: Pickup OTP visible, Delivery OTP redacted")
 
 # 3. Customer view: sees delivery_otp, pickup_otp is redacted
-res = client.get(f"/api/deliveries/{ref}?role=customer")
+res = client.get(f"/api/deliveries/{ref}?role=customer&stakeholder=Surat+Fresh+Mart")
 assert res.status_code == 200
 customer_data = json.loads(res.data.decode("utf-8"))["delivery"]
 assert customer_data.get("delivery_otp") == delivery_otp, "Customer must see delivery_otp"
 assert not customer_data.get("pickup_otp"), "Customer must NOT see pickup_otp"
 print("[OK] Customer View Privacy: Delivery OTP visible, Pickup OTP redacted")
+
+# 3b. Logistics view: NEVER sees pickup_otp, NEVER sees delivery_otp, NO demo keys
+res = client.get(f"/api/deliveries/{ref}?role=logistics")
+assert res.status_code == 200
+logistics_data = json.loads(res.data.decode("utf-8"))["delivery"]
+assert not logistics_data.get("pickup_otp"), "Logistics must NOT see pickup_otp"
+assert not logistics_data.get("delivery_otp"), "Logistics must NOT see delivery_otp"
+assert "demo_pickup_otp" not in logistics_data, "Logistics must NOT have demo_pickup_otp"
+assert "demo_delivery_otp" not in logistics_data, "Logistics must NOT have demo_delivery_otp"
+
+# Check list endpoint as well
+res_list = client.get("/api/deliveries?role=logistics")
+deliveries_list = json.loads(res_list.data.decode("utf-8"))["deliveries"]
+for d in deliveries_list:
+    assert not d.get("pickup_otp"), "Logistics deliveries list must not contain pickup_otp"
+    assert not d.get("delivery_otp"), "Logistics deliveries list must not contain delivery_otp"
+    assert "demo_pickup_otp" not in d, "Logistics deliveries list must not contain demo_pickup_otp"
+    assert "demo_delivery_otp" not in d, "Logistics deliveries list must not contain demo_delivery_otp"
+print("[OK] Logistics Dashboard Privacy: Neither Farmer OTP nor Buyer OTP is visible in logistics dashboard!")
 
 # 4. Driver verifies pickup with WRONG OTP
 res = client.post(f"/api/deliveries/{ref}/verify-pickup", json={"otp": "0000"})

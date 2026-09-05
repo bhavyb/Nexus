@@ -947,13 +947,23 @@ def get_delivery_updates(role: Optional[str] = None, stakeholder: Optional[str] 
         deliveries = []
         for row in rows:
             d = dict(row)
+            d.pop("demo_pickup_otp", None)
+            d.pop("demo_delivery_otp", None)
+
             if normalized_role == "farmer":
+                # Farmer ONLY sees pickup_otp for their own shipments, never delivery_otp
                 d["delivery_otp"] = ""
-            elif normalized_role == "customer":
+                if stakeholder and stakeholder.strip().lower() not in d.get("farmer_name", "").lower():
+                    d["pickup_otp"] = ""
+            elif normalized_role in ("customer", "buyer"):
+                # Customer/Buyer ONLY sees delivery_otp for their own orders, never pickup_otp
                 d["pickup_otp"] = ""
-            elif normalized_role == "logistics":
-                d["demo_pickup_otp"] = d.get("pickup_otp", "")
-                d["demo_delivery_otp"] = d.get("delivery_otp", "")
+                if stakeholder and stakeholder.strip().lower() not in d.get("buyer_name", "").lower():
+                    d["delivery_otp"] = ""
+            else:
+                # Logistics, drivers, and all other views NEVER see any secret OTPs
+                d["pickup_otp"] = ""
+                d["delivery_otp"] = ""
             deliveries.append(d)
         return deliveries
 

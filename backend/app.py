@@ -184,11 +184,22 @@ def api_get_delivery(reference: str):
     delivery = get_delivery_by_reference(reference)
     if not delivery:
         return jsonify({"success": False, "error": "Delivery not found"}), 404
+    delivery.pop("demo_pickup_otp", None)
+    delivery.pop("demo_delivery_otp", None)
     role = request.args.get("role", "").strip().lower()
+    stakeholder = (request.args.get("stakeholder") or "").strip().lower()
     if role == "farmer":
         delivery["delivery_otp"] = ""
-    elif role == "customer":
+        if stakeholder and stakeholder not in delivery.get("farmer_name", "").lower():
+            delivery["pickup_otp"] = ""
+    elif role in ("customer", "buyer"):
         delivery["pickup_otp"] = ""
+        if stakeholder and stakeholder not in delivery.get("buyer_name", "").lower():
+            delivery["delivery_otp"] = ""
+    else:
+        # Logistics, drivers, or public never see secret OTPs
+        delivery["pickup_otp"] = ""
+        delivery["delivery_otp"] = ""
     return jsonify({"success": True, "delivery": delivery})
 
 
@@ -206,6 +217,10 @@ def api_accept_delivery(reference: str):
         )
         if not delivery:
             return jsonify({"success": False, "error": "Delivery is already claimed or not found"}), 409
+        delivery["pickup_otp"] = ""
+        delivery["delivery_otp"] = ""
+        delivery.pop("demo_pickup_otp", None)
+        delivery.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": delivery})
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -225,6 +240,10 @@ def api_delivery_status(reference: str):
         )
         if not delivery:
             return jsonify({"success": False, "error": "Delivery not found"}), 404
+        delivery["pickup_otp"] = ""
+        delivery["delivery_otp"] = ""
+        delivery.pop("demo_pickup_otp", None)
+        delivery.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": delivery})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -239,6 +258,11 @@ def api_delivery_verify_pickup(reference: str):
         return jsonify({"success": False, "error": "Please provide the 4-digit Farmer Pickup OTP"}), 400
     try:
         updated = verify_delivery_pickup(reference, otp)
+        if updated:
+            updated["pickup_otp"] = ""
+            updated["delivery_otp"] = ""
+            updated.pop("demo_pickup_otp", None)
+            updated.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": updated, "message": "Pickup successfully verified with Farmer OTP!"})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -256,6 +280,11 @@ def api_delivery_verify_delivery(reference: str):
         return jsonify({"success": False, "error": "Please provide the 4-digit Buyer Delivery OTP"}), 400
     try:
         updated = verify_delivery_dropoff(reference, otp)
+        if updated:
+            updated["pickup_otp"] = ""
+            updated["delivery_otp"] = ""
+            updated.pop("demo_pickup_otp", None)
+            updated.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": updated, "message": "Delivery successfully verified with Customer OTP!"})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
