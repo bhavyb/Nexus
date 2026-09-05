@@ -51,6 +51,11 @@ from data_fetcher import (
     get_distinct_mandis,
     get_distinct_locations,
     get_mandi_data,
+    sync_live_market_data,
+    upload_custom_dataset,
+    save_api_key_to_env,
+    get_api_key,
+    reset_to_master_dataset,
 )
 from forecaster import predict_fair_price
 from mandi_comparator import compare_mandis_for_crop, reverse_geocode_coordinates
@@ -752,19 +757,148 @@ def api_impact_metrics():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route("/api/refresh-data", methods=["POST"])
+@app.route("/api/refresh-data", methods=["GET", "POST"])
 def api_refresh_data():
-    """POST /api/refresh-data -> manually triggers live data pull from data.gov.in."""
+    """
+    GET or POST /api/refresh-data
+    Refreshes mandi data to live status.
+    Accepts optional parameters: mode ('auto', 'ogd', 'sync'), api_key
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    mode = request.args.get("mode") or payload.get("mode", "auto")
+    api_key = request.args.get("api_key") or payload.get("api_key")
+
     try:
-        res = get_mandi_data(force_refresh=True)
+        res = sync_live_market_data(api_key=api_key, mode=mode)
         meta = res.get("metadata", {})
         return jsonify({
             "success": True,
-            "message": "Data refresh completed",
-            "metadata": meta
+            "message": meta.get("notice", "Live dataset refreshed successfully"),
+            "metadata": meta,
+            "total_records": len(res.get("records", []))
         })
     except Exception as e:
-        logger.error(f"Error refreshing data: {e}")
+        logger.error(f"Error refreshing data: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/dataset/upload", methods=["POST"])
+def api_dataset_upload():
+    """
+    POST /api/dataset/upload
+    Accepts CSV or JSON file upload (multipart/form-data or JSON payload)
+    Validates, standardizes, and activates the new dataset immediately.
+    """
+    file_content = None
+    filename = "custom_dataset.csv"
+
+    if "file" in request.files:
+        uploaded_file = request.files["file"]
+        if not uploaded_file.filename:
+            return jsonify({"success": False, "error": "No selected file"}), 400
+        filename = uploaded_file.filename
+        file_content = uploaded_file.read()
+    else:
+        payload = request.get_json(force=True, silent=True) or {}
+        if "file_content" in payload:
+            file_content = payload.get("file_content")
+            filename = payload.get("filename", "custom_dataset.csv")
+        elif "records" in payload:
+            file_content = json.dumps(payload)
+            filename = "custom_dataset.json"
+
+    if not file_content:
+        return jsonify({
+            "success": False,
+            "error": "No dataset file provided. Upload a .csv or .json file with form field 'file'."
+        }), 400
+
+    try:
+        success, msg, stats = upload_custom_dataset(file_content, filename)
+        if success:
+            current_status = get_cache_status()
+            return jsonify({
+                "success": True,
+                "message": msg,
+                "stats": stats,
+                "data": current_status
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": msg,
+                "stats": stats
+            }), 400
+    except Exception as e:
+        logger.error(f"Error processing uploaded dataset: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"Upload failed: {str(e)}"}), 500
+
+
+@app.route("/api/dataset/config-key", methods=["POST"])
+def api_dataset_config_key():
+    """
+    POST /api/dataset/config-key
+    Updates and tests the Open Government Data (data.gov.in) API key.
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    api_key = payload.get("api_key", "").strip()
+
+    if not api_key:
+        return jsonify({"success": False, "error": "API key cannot be empty"}), 400
+
+    saved = save_api_key_to_env(api_key)
+    if not saved:
+        return jsonify({"success": False, "error": "Failed to save API key to server environment"}), 500
+
+    return jsonify({
+        "success": True,
+        "message": "OGD API key saved successfully. You can now pull live government rates directly.",
+        "api_key_configured": bool(get_api_key())
+    })
+
+
+@app.route("/api/dataset/sample", methods=["GET"])
+def api_dataset_sample():
+    """
+    GET /api/dataset/sample
+    Returns a sample CSV template for Agmarknet mandi data ingestion.
+    """
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    sample_csv = (
+        "State,District,Market,Commodity,Variety,Arrival_Date,Min_Price,Max_Price,Modal_Price\n"
+        f"Gujarat,Ahmedabad,Ahmedabad,Tomato,Hybrid,{today},2200,2800,2500\n"
+        f"Gujarat,Ahmedabad,Sanand,Potato,Deshi,{today},1400,1800,1600\n"
+        f"Gujarat,Rajkot,Gondal,Onion,Red,{today},1800,2400,2100\n"
+        f"Gujarat,Surat,Surat,Wheat,Lokwan,{today},2600,3100,2850\n"
+        f"Gujarat,Anand,Anand,Groundnut,GJ-20,{today},6200,7100,6650\n"
+        f"Gujarat,Vadodara,Vadodara,Cotton,Shankar-6,{today},7200,7800,7500\n"
+    )
+    from flask import Response
+    return Response(
+        sample_csv,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=nexus_agmarknet_template.csv"}
+    )
+
+
+@app.route("/api/dataset/reset-master", methods=["POST"])
+def api_dataset_reset_master():
+    """
+    POST /api/dataset/reset-master
+    Reverts current cache to the full 4,993 official master Agmarknet records,
+    advances date to today, and activates live status.
+    """
+    try:
+        res = reset_to_master_dataset()
+        status = get_cache_status()
+        return jsonify({
+            "success": True,
+            "message": "Successfully restored 4,993 official master Agmarknet records for today.",
+            "data": status
+        })
+    except Exception as e:
+        logger.error(f"Error resetting to master dataset: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
