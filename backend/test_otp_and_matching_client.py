@@ -40,6 +40,25 @@ assert customer_data.get("delivery_otp") == delivery_otp, "Customer must see del
 assert not customer_data.get("pickup_otp"), "Customer must NOT see pickup_otp"
 print("[OK] Customer View Privacy: Delivery OTP visible, Pickup OTP redacted")
 
+# 3b. Logistics / Driver view: CANNOT see pickup_otp OR delivery_otp!
+res_driver = client.get(f"/api/deliveries/{ref}?role=logistics")
+assert res_driver.status_code == 200
+driver_data = json.loads(res_driver.data.decode("utf-8"))["delivery"]
+assert not driver_data.get("pickup_otp"), "Driver must NOT see pickup_otp"
+assert not driver_data.get("delivery_otp"), "Driver must NOT see delivery_otp"
+assert not driver_data.get("demo_pickup_otp"), "Driver must NOT have demo_pickup_otp"
+assert not driver_data.get("demo_delivery_otp"), "Driver must NOT have demo_delivery_otp"
+
+res_driver_list = client.get(f"/api/deliveries?role=logistics")
+assert res_driver_list.status_code == 200
+driver_deliveries = json.loads(res_driver_list.data.decode("utf-8"))["deliveries"]
+for d in driver_deliveries:
+    assert not d.get("pickup_otp"), "Driver deliveries list must NOT expose pickup_otp"
+    assert not d.get("delivery_otp"), "Driver deliveries list must NOT expose delivery_otp"
+    assert not d.get("demo_pickup_otp"), "Driver deliveries list must NOT have demo_pickup_otp"
+    assert not d.get("demo_delivery_otp"), "Driver deliveries list must NOT have demo_delivery_otp"
+print("[OK] Logistics / Driver View Privacy: BOTH Pickup & Delivery OTPs completely hidden from Driver")
+
 # 4. Driver verifies pickup with WRONG OTP
 res = client.post(f"/api/deliveries/{ref}/verify-pickup", json={"otp": "0000"})
 fail_pickup = json.loads(res.data.decode("utf-8"))

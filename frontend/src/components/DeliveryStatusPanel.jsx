@@ -520,18 +520,18 @@ export default function DeliveryStatusPanel({ role, stakeholder, user }) {
               {isLogistics && (
                 <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--color-soil-dark)', textTransform: 'uppercase' }}>
                         Driver Operations & Verification Controls
                       </span>
-                      {delivery.demo_pickup_otp && delivery.status === 'Accepted' && (
-                        <span style={{ fontSize: '0.7rem', color: '#6B7280', background: '#F3F4F6', padding: '2px 6px', borderRadius: '4px' }}>
-                          (Farmer OTP: <strong>{delivery.demo_pickup_otp}</strong>)
+                      {delivery.status === 'Accepted' && (
+                        <span style={{ fontSize: '0.7rem', color: '#047857', background: '#ECFDF5', border: '1px solid #A7F3D0', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+                          🔒 Requires Farmer Pickup OTP
                         </span>
                       )}
-                      {delivery.demo_delivery_otp && delivery.status === 'In Transit' && (
-                        <span style={{ fontSize: '0.7rem', color: '#6B7280', background: '#F3F4F6', padding: '2px 6px', borderRadius: '4px' }}>
-                          (Buyer OTP: <strong>{delivery.demo_delivery_otp}</strong>)
+                      {delivery.status === 'In Transit' && (
+                        <span style={{ fontSize: '0.7rem', color: '#1E40AF', background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+                          🔒 Requires Buyer Delivery OTP
                         </span>
                       )}
                     </div>

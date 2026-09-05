@@ -76,12 +76,12 @@ export default function SystemOverview({ onNavigate }) {
       borderColor: '#DDD6FE',
       icon: <Truck size={24} color="#7C3AED" />,
       points: [
-        'Shared vehicle routing (Tata Ace / Bolero mini-trucks)',
-        'Consolidates multi-farmer pickups into single run',
-        '28% distance saved & 22% transport cost reduction',
+        'Shared vehicle dispatch (Tata Ace / Bolero mini-trucks)',
+        'Consolidates multi-farmer pickups with buyer fulfillment',
+        'Transparent delivery checkpoints & two-sided OTP verification',
         'High vehicle capacity utilization (85-95%)'
       ],
-      cta: 'Launch Route Optimizer'
+      cta: 'Launch Logistics Hub'
     }
   ];
 

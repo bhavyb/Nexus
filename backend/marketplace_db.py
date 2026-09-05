@@ -947,13 +947,19 @@ def get_delivery_updates(role: Optional[str] = None, stakeholder: Optional[str] 
         deliveries = []
         for row in rows:
             d = dict(row)
+            d.pop("demo_pickup_otp", None)
+            d.pop("demo_delivery_otp", None)
             if normalized_role == "farmer":
                 d["delivery_otp"] = ""
-            elif normalized_role == "customer":
+                if stakeholder and stakeholder.strip().lower() not in (d.get("farmer_name") or "").lower():
+                    d["pickup_otp"] = ""
+            elif normalized_role in ("customer", "buyer"):
                 d["pickup_otp"] = ""
-            elif normalized_role == "logistics":
-                d["demo_pickup_otp"] = d.get("pickup_otp", "")
-                d["demo_delivery_otp"] = d.get("delivery_otp", "")
+                if stakeholder and stakeholder.strip().lower() not in (d.get("buyer_name") or "").lower():
+                    d["delivery_otp"] = ""
+            else:
+                d["pickup_otp"] = ""
+                d["delivery_otp"] = ""
             deliveries.append(d)
         return deliveries
 

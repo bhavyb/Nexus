@@ -80,6 +80,7 @@ from marketplace_db import (
     update_delivery_status,
     verify_delivery_pickup,
     verify_delivery_dropoff,
+    get_db_connection
 )
 from markup_detector import analyze_price_markup, get_live_commodity_benchmark
 from ai_engine import (
@@ -184,11 +185,21 @@ def api_get_delivery(reference: str):
     delivery = get_delivery_by_reference(reference)
     if not delivery:
         return jsonify({"success": False, "error": "Delivery not found"}), 404
+    delivery.pop("demo_pickup_otp", None)
+    delivery.pop("demo_delivery_otp", None)
     role = request.args.get("role", "").strip().lower()
+    stakeholder = (request.args.get("stakeholder") or request.args.get("name") or "").strip().lower()
     if role == "farmer":
         delivery["delivery_otp"] = ""
-    elif role == "customer":
+        if stakeholder and stakeholder not in (delivery.get("farmer_name") or "").lower():
+            delivery["pickup_otp"] = ""
+    elif role in ("customer", "buyer"):
         delivery["pickup_otp"] = ""
+        if stakeholder and stakeholder not in (delivery.get("buyer_name") or "").lower():
+            delivery["delivery_otp"] = ""
+    else:  # logistics or unspecified role
+        delivery["pickup_otp"] = ""
+        delivery["delivery_otp"] = ""
     return jsonify({"success": True, "delivery": delivery})
 
 
@@ -206,6 +217,10 @@ def api_accept_delivery(reference: str):
         )
         if not delivery:
             return jsonify({"success": False, "error": "Delivery is already claimed or not found"}), 409
+        delivery["pickup_otp"] = ""
+        delivery["delivery_otp"] = ""
+        delivery.pop("demo_pickup_otp", None)
+        delivery.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": delivery})
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -225,6 +240,10 @@ def api_delivery_status(reference: str):
         )
         if not delivery:
             return jsonify({"success": False, "error": "Delivery not found"}), 404
+        delivery["pickup_otp"] = ""
+        delivery["delivery_otp"] = ""
+        delivery.pop("demo_pickup_otp", None)
+        delivery.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": delivery})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -239,6 +258,11 @@ def api_delivery_verify_pickup(reference: str):
         return jsonify({"success": False, "error": "Please provide the 4-digit Farmer Pickup OTP"}), 400
     try:
         updated = verify_delivery_pickup(reference, otp)
+        if updated:
+            updated["pickup_otp"] = ""
+            updated["delivery_otp"] = ""
+            updated.pop("demo_pickup_otp", None)
+            updated.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": updated, "message": "Pickup successfully verified with Farmer OTP!"})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -256,6 +280,11 @@ def api_delivery_verify_delivery(reference: str):
         return jsonify({"success": False, "error": "Please provide the 4-digit Buyer Delivery OTP"}), 400
     try:
         updated = verify_delivery_dropoff(reference, otp)
+        if updated:
+            updated["pickup_otp"] = ""
+            updated["delivery_otp"] = ""
+            updated.pop("demo_pickup_otp", None)
+            updated.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": updated, "message": "Delivery successfully verified with Customer OTP!"})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -845,15 +874,97 @@ def api_logistics_dynamic_match():
 def api_route_optimize():
     """
     POST /api/route-optimize
-    Solves shared vehicle routing (multi-pickup, multi-drop) and returns distance/cost/CO2 savings.
+    Dynamically solves shared vehicle routing (multi-pickup, multi-drop) from:
+    1) Selected order_references from live database delivery_updates
+    2) Or explicit pickups and deliveries payload
+    3) Or default multi-farm scenario
     """
     payload = request.get_json(force=True, silent=True) or {}
     vehicle_cap = float(payload.get("vehicle_capacity_kg", 1000.0))
     cost_km = float(payload.get("cost_per_km", 24.0))
     pickups = payload.get("pickups")
     deliveries = payload.get("deliveries")
+    order_references = payload.get("order_references") or []
+    mode = payload.get("mode", "live")
 
     try:
+        from mandi_comparator import resolve_coordinates
+
+        # Dynamic Route Generation from Live Database Orders
+        # If not explicitly specified and not in preset mode, auto-load active non-delivered orders from database
+        if mode != "preset" and not order_references and not pickups:
+            with get_db_connection() as conn:
+                active_rows = conn.execute(
+                    """SELECT reference FROM delivery_updates 
+                       WHERE (farmer_name NOT LIKE '%test%' OR farmer_name IS NULL)
+                         AND (buyer_name NOT LIKE '%test%' OR buyer_name IS NULL)
+                         AND reference != 'ADH-1001'
+                         AND status != 'Delivered'
+                       ORDER BY id DESC LIMIT 4"""
+                ).fetchall()
+                if len(active_rows) >= 2:
+                    order_references = [r["reference"] for r in active_rows]
+
+        if order_references and len(order_references) >= 1:
+            with get_db_connection() as conn:
+                placeholders = ",".join(["?"] * len(order_references))
+                rows = conn.execute(
+                    f"SELECT * FROM delivery_updates WHERE reference IN ({placeholders})",
+                    order_references
+                ).fetchall()
+
+            if rows:
+                dyn_pickups = []
+                dyn_deliveries = []
+                for idx, r in enumerate(rows):
+                    p_loc = r["pickup_location"] or "Sanand, Ahmedabad"
+                    d_loc = r["destination"] or "SG Highway, Ahmedabad"
+                    p_lat, p_lng, _ = resolve_coordinates(None, None, p_loc)
+                    d_lat, d_lng, _ = resolve_coordinates(None, None, d_loc)
+                    p_lat += (idx * 0.012)
+                    p_lng += (idx * 0.009)
+                    d_lat += (idx * 0.015)
+                    d_lng += (idx * 0.011)
+
+                    crop_name = r["crop"] or "Produce"
+                    qty = float(r["quantity_kg"] or 100.0)
+                    is_perish = crop_name.lower() in ("tomato", "banana", "green chilli", "vegetable")
+
+                    dyn_pickups.append({
+                        "id": f"F_{r['reference']}",
+                        "name": r["farmer_name"] or f"Farmer #{idx+1}",
+                        "farmer_title": f"{r['farmer_name']} ({p_loc})",
+                        "location": p_loc,
+                        "lat": p_lat,
+                        "lng": p_lng,
+                        "load_kg": qty,
+                        "crop": crop_name,
+                        "perishable": is_perish,
+                        "priority": "High (Perishable)" if is_perish else "Normal",
+                        "status": "Ready for Pickup",
+                        "phone": f"+91 9825{idx+1} 1120{idx+1}",
+                        "otp": str(r["pickup_otp"] or (4100 + idx * 231)),
+                        "reference": r["reference"]
+                    })
+
+                    dyn_deliveries.append({
+                        "id": f"B_{r['reference']}",
+                        "name": r["buyer_name"] or f"Buyer #{idx+1}",
+                        "buyer_type": "Retail / Wholesale Buyer",
+                        "location": d_loc,
+                        "lat": d_lat,
+                        "lng": d_lng,
+                        "drop_kg": qty,
+                        "items": {crop_name: qty},
+                        "deadline": f"0{10+idx}:30 AM",
+                        "phone": f"+91 9825{idx+1} 4450{idx+1}",
+                        "otp": str(r["delivery_otp"] or (5100 + idx * 319)),
+                        "reference": r["reference"]
+                    })
+
+                pickups = dyn_pickups
+                deliveries = dyn_deliveries
+
         route_data = optimize_shared_logistics_route(
             pickups=pickups,
             deliveries=deliveries,
@@ -864,6 +975,81 @@ def api_route_optimize():
     except Exception as e:
         logger.error(f"Error optimizing routes: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/route-optimize/verify-stop", methods=["POST"])
+def api_route_optimize_verify_stop():
+    """
+    POST /api/route-optimize/verify-stop
+    Validates Farmer Pickup OTP or Buyer Delivery OTP for a specific stop in multi-stop shared routing.
+    Also updates the live SQLite database record if a tracking reference is associated!
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    stop_id = payload.get("stop_id", "").strip()
+    submitted_otp = str(payload.get("otp", "")).strip()
+    expected_otp = str(payload.get("expected_otp", "")).strip()
+    stop_type = payload.get("stop_type", "pickup").strip().lower()
+    entity_name = payload.get("entity", "Partner").strip()
+    reference = payload.get("reference", "").strip()
+
+    if not submitted_otp:
+        return jsonify({"success": False, "error": "Please provide the 4-digit verification code"}), 400
+
+    # If reference exists in live database, verify directly against the database order!
+    if reference:
+        try:
+            if stop_type == "pickup":
+                verify_delivery_pickup(reference, submitted_otp)
+            else:
+                verify_delivery_dropoff(reference, submitted_otp)
+
+            success_msg = (
+                f"✓ Farmgate Pickup verified for {entity_name} via Farmer OTP! Produce loaded onto vehicle."
+                if stop_type == "pickup"
+                else f"✓ Doorstep Delivery verified for {entity_name} via Customer OTP! Produce handed over."
+            )
+            return jsonify({
+                "success": True,
+                "stop_id": stop_id,
+                "verified": True,
+                "reference": reference,
+                "message": success_msg
+            })
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+
+    # If expected_otp was not provided directly, match with route sequence
+    if not expected_otp:
+        route_data = optimize_shared_logistics_route()
+        for s in (route_data.get("route_sequence") or route_data.get("route_stops") or []):
+            if s.get("stop_id") == stop_id:
+                expected_otp = str(s.get("otp", ""))
+                stop_type = s.get("otp_type", stop_type)
+                entity_name = s.get("entity", entity_name)
+                break
+
+    if not expected_otp:
+        return jsonify({"success": False, "error": f"Stop {stop_id} not found in active route"}), 404
+
+    if submitted_otp != expected_otp:
+        otp_title = "Farmer Pickup OTP" if stop_type == "pickup" else "Buyer Delivery OTP"
+        return jsonify({
+            "success": False,
+            "error": f"Invalid {otp_title} '{submitted_otp}' for {entity_name}. Please request the correct 4-digit code from {entity_name}."
+        }), 400
+
+    success_msg = (
+        f"✓ Farmgate Pickup verified for {entity_name} via Farmer OTP! Produce loaded onto vehicle."
+        if stop_type == "pickup"
+        else f"✓ Doorstep Delivery verified for {entity_name} via Customer OTP! Produce handed over."
+    )
+
+    return jsonify({
+        "success": True,
+        "stop_id": stop_id,
+        "verified": True,
+        "message": success_msg
+    })
 
 
 @app.route("/api/logistics/fleet", methods=["GET"])

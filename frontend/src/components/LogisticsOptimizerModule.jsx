@@ -27,12 +27,41 @@ import {
   Store,
   Users,
   PlusCircle,
-  XCircle
+  XCircle,
+  KeyRound,
+  Phone,
+  Check
 } from 'lucide-react';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
 
 export default function LogisticsOptimizerModule({ user }) {
-  const [activeSubTab, setActiveSubTab] = useState('live-orders'); // 'live-orders', 'matching', 'fleet'
+  const [activeSubTab, setActiveSubTab] = useState('live-orders'); // 'live-orders', 'route-opt', 'matching', 'fleet'
+
+  // Multi-Farmer & Multi-Customer Route Optimization State
+  const [routeData, setRouteData] = useState(null);
+  const [routeStops, setRouteStops] = useState([]);
+  const [loadingRoute, setLoadingRoute] = useState(false);
+  const [currentOnboardKg, setCurrentOnboardKg] = useState(0);
+  const [showPhoneSimulator, setShowPhoneSimulator] = useState(true);
+  const [otpModalStop, setOtpModalStop] = useState(null);
+  const [routeOtpInput, setRouteOtpInput] = useState('');
+  const [routeOtpError, setRouteOtpError] = useState('');
+  const [routeOtpSuccess, setRouteOtpSuccess] = useState('');
+  const [verifyingStopOtp, setVerifyingStopOtp] = useState(false);
+
+  // Dynamic Route Selection State
+  const [routeMode, setRouteMode] = useState('live-db'); // 'live-db' or 'preset'
+  const [selectedRouteOrderRefs, setSelectedRouteOrderRefs] = useState([]);
+  const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
+  const [newOrderForm, setNewOrderForm] = useState({
+    farmer_name: 'Kishan Patel',
+    pickup_location: 'Sanand, Ahmedabad',
+    crop: 'Tomato',
+    quantity_kg: 200,
+    buyer_name: 'Ahmedabad Retail Mart',
+    destination: 'Vastrapur, Ahmedabad'
+  });
+  const [creatingOrder, setCreatingOrder] = useState(false);
 
   // Dynamic Matching & Live Deliveries State
   const [liveDeliveries, setLiveDeliveries] = useState([]);
@@ -71,6 +100,12 @@ export default function LogisticsOptimizerModule({ user }) {
           setLiveDeliveries(valid);
           if (valid.length > 0) {
             setSelectedOrderRef((prev) => prev && valid.some((v) => v.reference === prev) ? prev : valid[0].reference);
+            setSelectedRouteOrderRefs((prev) => {
+              if (prev.length > 0 && prev.some((r) => valid.some((v) => v.reference === r))) {
+                return prev;
+              }
+              return valid.slice(0, 3).map((v) => v.reference);
+            });
           } else {
             setSelectedOrderRef('');
             setDynamicCandidates([]);
@@ -140,6 +175,152 @@ export default function LogisticsOptimizerModule({ user }) {
       runDynamicVehicleMatch(selectedOrderRef);
     }
   }, [activeSubTab, selectedOrderRef]);
+
+  // Fetch multi-stop route optimization
+  const fetchRouteOptimization = (orderRefs = null, explicitMode = null) => {
+    setLoadingRoute(true);
+    const activeMode = explicitMode || (orderRefs && orderRefs.length > 0 ? 'live' : (routeMode === 'preset' ? 'preset' : 'live'));
+    const body = { vehicle_capacity_kg: 1000, cost_per_km: 24, mode: activeMode };
+    if (orderRefs && orderRefs.length > 0) {
+      body.order_references = orderRefs;
+    }
+    fetch('/api/route-optimize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data) {
+          setRouteData(data.data);
+          const stops = data.data.route_sequence || data.data.route_stops || [];
+          setRouteStops(
+            stops.map((s) => ({
+              ...s,
+              is_verified: s.type === 'ORIGIN',
+              verified_at: s.type === 'ORIGIN' ? 'Departed from Yard' : null
+            }))
+          );
+          setCurrentOnboardKg(0);
+        }
+      })
+      .catch((err) => console.error('Error fetching route optimization:', err))
+      .finally(() => setLoadingRoute(false));
+  };
+
+  const toggleOrderSelection = (ref) => {
+    setSelectedRouteOrderRefs((prev) => {
+      const next = prev.includes(ref) ? prev.filter((r) => r !== ref) : [...prev, ref];
+      fetchRouteOptimization(next.length > 0 ? next : null, 'live');
+      return next;
+    });
+  };
+
+  const handleCreateLiveOrder = async (e) => {
+    e.preventDefault();
+    setCreatingOrder(true);
+    try {
+      const res = await fetch('/api/deliveries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newOrderForm)
+      });
+      const data = await res.json();
+      if (data.success && data.delivery) {
+        setShowCreateOrderModal(false);
+        const newRef = data.delivery.reference;
+        const updatedRefs = [...selectedRouteOrderRefs, newRef];
+        setSelectedRouteOrderRefs(updatedRefs);
+        fetchLiveDeliveries();
+        fetchRouteOptimization(updatedRefs);
+      }
+    } catch (err) {
+      console.error('Error creating live order:', err);
+    } finally {
+      setCreatingOrder(false);
+    }
+  };
+
+  const handleVerifyStopOtp = async (e) => {
+    if (e) e.preventDefault();
+    if (!otpModalStop || !routeOtpInput.trim()) return;
+    setVerifyingStopOtp(true);
+    setRouteOtpError('');
+    setRouteOtpSuccess('');
+
+    try {
+      const res = await fetch('/api/route-optimize/verify-stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stop_id: otpModalStop.stop_id,
+          otp: routeOtpInput.trim(),
+          expected_otp: otpModalStop.otp,
+          stop_type: otpModalStop.otp_type,
+          entity: otpModalStop.entity,
+          reference: otpModalStop.reference || ''
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRouteOtpSuccess(data.message);
+        setRouteStops((prevStops) =>
+          prevStops.map((s) =>
+            s.stop_id === otpModalStop.stop_id
+              ? {
+                  ...s,
+                  is_verified: true,
+                  verified_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                }
+              : s
+          )
+        );
+        setCurrentOnboardKg(otpModalStop.onboard_load_kg);
+        fetchLiveDeliveries();
+        setTimeout(() => {
+          setOtpModalStop(null);
+          setRouteOtpInput('');
+          setRouteOtpSuccess('');
+        }, 1100);
+      } else {
+        setRouteOtpError(data.error || 'Invalid verification OTP code.');
+      }
+    } catch (err) {
+      setRouteOtpError('Network connection error while verifying OTP.');
+    } finally {
+      setVerifyingStopOtp(false);
+    }
+  };
+
+  const handleResetRoute = () => {
+    if (routeData) {
+      const stops = routeData.route_sequence || routeData.route_stops || [];
+      setRouteStops(
+        stops.map((s) => ({
+          ...s,
+          is_verified: s.type === 'ORIGIN',
+          verified_at: s.type === 'ORIGIN' ? 'Departed from Yard' : null
+        }))
+      );
+      setCurrentOnboardKg(0);
+      setOtpModalStop(null);
+      setRouteOtpInput('');
+      setRouteOtpError('');
+      setRouteOtpSuccess('');
+    } else {
+      fetchRouteOptimization(routeMode === 'live-db' ? selectedRouteOrderRefs : null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === 'route-opt') {
+      if (routeMode === 'live-db' && selectedRouteOrderRefs.length > 0) {
+        fetchRouteOptimization(selectedRouteOrderRefs);
+      } else if (!routeData) {
+        fetchRouteOptimization(null);
+      }
+    }
+  }, [activeSubTab, routeMode]);
 
   // Handle Partner Registration
   const handleRegisterPartner = (e) => {
@@ -221,10 +402,10 @@ export default function LogisticsOptimizerModule({ user }) {
             <Sparkles size={14} /> AI Logistics Engine & Shared Delivery Platform
           </div>
           <h2 style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '4px 0 0 0' }}>
-            Smart Logistics & Multi-Farmer Route Optimization
+            Smart Logistics & Shared Fleet Dispatch
           </h2>
           <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-            Aggregates nearby farm orders into a single shared vehicle, matches the best logistics partner, and optimizes multi-stop delivery.
+            Aggregates nearby farm orders into shared vehicles and matches the best logistics partner.
           </div>
         </div>
 
@@ -257,6 +438,26 @@ export default function LogisticsOptimizerModule({ user }) {
             }}
           >
             <Truck size={15} color="#7C3AED" /> ⚡ Live Orders & Dispatch
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('route-opt')}
+            style={{
+              padding: '8px 14px',
+              borderRadius: '8px',
+              border: 'none',
+              background: activeSubTab === 'route-opt' ? 'white' : 'transparent',
+              color: activeSubTab === 'route-opt' ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)',
+              fontWeight: 700,
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+              boxShadow: activeSubTab === 'route-opt' ? 'var(--shadow-sm)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <Navigation size={15} color="#059669" /> AI Route Optimization
           </button>
 
           <button
@@ -310,6 +511,885 @@ export default function LogisticsOptimizerModule({ user }) {
           stakeholder={user?.organization || user?.name || user?.email || 'Logistics Partner'}
           user={user}
         />
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB: AI ROUTE OPTIMIZATION (MULTI-FARMER & MULTI-CUSTOMER WITH OTP)  */}
+      {/* ========================================================================= */}
+      {activeSubTab === 'route-opt' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Header Controls Banner */}
+          <div
+            style={{
+              background: 'white',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '20px 24px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '16px'
+            }}
+          >
+            <div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.74rem', fontWeight: 800, color: '#059669', textTransform: 'uppercase' }}>
+                <Navigation size={14} /> Shared Multi-Farm Pickup & Multi-Buyer Delivery
+              </div>
+              <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '4px 0 2px 0' }}>
+                AI Route Optimization
+              </h3>
+              <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
+                Sequences multiple farmgate pickups into an optimal route and fulfills clustered buyers with two-sided OTP verification at every stop.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                className="btn-secondary"
+                onClick={() => setShowPhoneSimulator(!showPhoneSimulator)}
+                style={{
+                  padding: '8px 14px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderColor: showPhoneSimulator ? '#059669' : 'var(--color-border)',
+                  color: showPhoneSimulator ? '#059669' : 'var(--color-soil-dark)',
+                  background: showPhoneSimulator ? '#ECFDF5' : 'white'
+                }}
+              >
+                <Phone size={14} />
+                {showPhoneSimulator ? 'Hide Handsets' : '📱 Show Farmer & Buyer Handsets'}
+              </button>
+
+              <button
+                className="btn-secondary"
+                onClick={handleResetRoute}
+                style={{ padding: '8px 14px', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <RotateCcw size={14} /> Reset Route
+              </button>
+            </div>
+          </div>
+
+          {/* DYNAMIC MODE CONTROLS & LIVE DATABASE ORDER PICKER */}
+          <div
+            style={{
+              background: 'white',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '18px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--color-soil-dark)', textTransform: 'uppercase' }}>
+                  📦 Route Order Source:
+                </span>
+                <div style={{ display: 'inline-flex', background: 'var(--color-bg-subtle)', padding: '3px', borderRadius: '8px', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRouteMode('live-db');
+                      fetchRouteOptimization(selectedRouteOrderRefs, 'live');
+                    }}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      background: routeMode === 'live-db' ? 'white' : 'transparent',
+                      color: routeMode === 'live-db' ? '#059669' : 'var(--color-text-secondary)',
+                      boxShadow: routeMode === 'live-db' ? 'var(--shadow-sm)' : 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}
+                  >
+                    ⚡ Dynamic Live Database Orders ({liveDeliveries.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRouteMode('preset');
+                      fetchRouteOptimization(null, 'preset');
+                    }}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      background: routeMode === 'preset' ? 'white' : 'transparent',
+                      color: routeMode === 'preset' ? '#7C3AED' : 'var(--color-text-secondary)',
+                      boxShadow: routeMode === 'preset' ? 'var(--shadow-sm)' : 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}
+                  >
+                    🌾 3-Farm Sample Corridor
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowCreateOrderModal(true)}
+                  style={{ fontSize: '0.78rem', padding: '6px 14px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <PlusCircle size={14} color="#059669" /> + Add New Live Order
+                </button>
+                {routeMode === 'live-db' && (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => fetchRouteOptimization(selectedRouteOrderRefs)}
+                    disabled={selectedRouteOrderRefs.length < 1 || loadingRoute}
+                    style={{ fontSize: '0.78rem', padding: '6px 14px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <RefreshCw size={13} className={loadingRoute ? 'spin-icon' : ''} />
+                    {loadingRoute ? 'Calculating Route...' : `Optimize Selected (${selectedRouteOrderRefs.length})`}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* If in live-db mode, display order selector checklist */}
+            {routeMode === 'live-db' && (
+              <div style={{ background: 'var(--color-bg-subtle)', padding: '12px 14px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--color-soil-dark)', textTransform: 'uppercase' }}>
+                    Select 2 or More Real Orders to Combine into AI Multi-Stop Run:
+                  </span>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allRefs = liveDeliveries.map((d) => d.reference);
+                        setSelectedRouteOrderRefs(allRefs);
+                        fetchRouteOptimization(allRefs);
+                      }}
+                      style={{ background: 'none', border: 'none', color: '#2563EB', fontSize: '0.74rem', fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                    >
+                      Select All ({liveDeliveries.length})
+                    </button>
+                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>•</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const topTwo = liveDeliveries.slice(0, 2).map((d) => d.reference);
+                        setSelectedRouteOrderRefs(topTwo);
+                        fetchRouteOptimization(topTwo);
+                      }}
+                      style={{ background: 'none', border: 'none', color: '#059669', fontSize: '0.74rem', fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                    >
+                      Select Top 2
+                    </button>
+                  </div>
+                </div>
+
+                {liveDeliveries.length > 0 ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
+                    {liveDeliveries.map((order) => {
+                      const isChecked = selectedRouteOrderRefs.includes(order.reference);
+                      return (
+                        <div
+                          key={order.reference}
+                          onClick={() => toggleOrderSelection(order.reference)}
+                          style={{
+                            background: isChecked ? '#ECFDF5' : 'white',
+                            border: `1.5px solid ${isChecked ? '#059669' : 'var(--color-border)'}`,
+                            borderRadius: '6px',
+                            padding: '9px 12px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}}
+                            style={{ accentColor: '#059669', cursor: 'pointer', width: '16px', height: '16px' }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>
+                                {order.crop} ({order.quantity_kg} kg)
+                              </span>
+                              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#059669', background: '#E8F5E9', padding: '1px 5px', borderRadius: '4px' }}>
+                                {order.status}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '1px' }}>
+                              🌾 {order.farmer_name} ({order.pickup_location}) ➔ 🛒 {order.buyer_name} ({order.destination})
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', padding: '6px 0' }}>
+                    No active live orders in queue. Click "+ Add New Live Order" to add real farmer orders.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* SIMULATED FARMER & BUYER HANDSET SCREENS PANEL (WHEN TOGGLED) */}
+          {showPhoneSimulator && (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%)',
+                border: '1.5px solid #BFDBFE',
+                borderRadius: 'var(--radius-lg)',
+                padding: '18px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#1E40AF', textTransform: 'uppercase' }}>
+                    📱 Participant Handset Simulator (Confidential OTPs)
+                  </span>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--color-soil-dark)', fontWeight: 600, marginTop: '2px' }}>
+                    Each farmer and customer receives their own independent 4-digit code. In production, this is visible only on their phone screen.
+                  </div>
+                </div>
+                <span style={{ fontSize: '0.72rem', color: '#2563EB', fontWeight: 700, background: '#DBEAFE', padding: '3px 8px', borderRadius: '6px' }}>
+                  Click code to pre-fill active prompt
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px' }}>
+                {routeStops
+                  .filter((s) => s.type !== 'ORIGIN')
+                  .map((stop) => {
+                    const isFarmer = stop.type === 'PICKUP';
+                    const isVerified = stop.is_verified;
+                    return (
+                      <div
+                        key={stop.stop_id}
+                        style={{
+                          background: 'white',
+                          borderRadius: '8px',
+                          border: `1.5px solid ${isVerified ? '#A7F3D0' : isFarmer ? '#BBF7D0' : '#BFDBFE'}`,
+                          padding: '12px 14px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          position: 'relative'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              color: isFarmer ? '#047857' : '#1E40AF',
+                              background: isFarmer ? '#DCFCE7' : '#DBEAFE',
+                              padding: '2px 6px',
+                              borderRadius: '4px'
+                            }}
+                          >
+                            {isFarmer ? '🌾 Farmer Screen' : '🛒 Buyer Screen'}
+                          </span>
+                          {isVerified && (
+                            <span style={{ fontSize: '0.68rem', color: '#059669', fontWeight: 700 }}>
+                              ✓ Verified
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ fontWeight: 800, fontSize: '0.86rem', color: 'var(--color-soil-dark)' }}>
+                          {stop.entity}
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
+                          📍 {stop.location}
+                        </div>
+
+                        <div
+                          style={{
+                            marginTop: '6px',
+                            padding: '8px 10px',
+                            background: isVerified ? '#F0FDF4' : isFarmer ? '#F0FDF4' : '#EFF6FF',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => {
+                            if (otpModalStop) {
+                              setRouteOtpInput(stop.otp);
+                            }
+                          }}
+                          title="Click to copy or autofill"
+                        >
+                          <div>
+                            <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+                              {isFarmer ? 'Pickup OTP' : 'Delivery OTP'}
+                            </div>
+                            <div style={{ fontSize: '1.25rem', fontWeight: 900, letterSpacing: '2px', color: isFarmer ? '#047857' : '#1E40AF', fontFamily: 'monospace' }}>
+                              {stop.otp}
+                            </div>
+                          </div>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                            {stop.phone}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          {/* ROUTE METRICS & VEHICLE CAPACITY PROGRESS BAR */}
+          {routeData && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
+              {/* Vehicle Capacity Gauge */}
+              <div
+                style={{
+                  background: 'white',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--color-soil-dark)', textTransform: 'uppercase' }}>
+                    🚚 Vehicle Live Load Tracker
+                  </span>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#059669' }}>
+                    {currentOnboardKg} / {routeData.vehicle_capacity_kg} kg ({Math.round((currentOnboardKg / routeData.vehicle_capacity_kg) * 100)}%)
+                  </span>
+                </div>
+
+                {/* Gauge Progress Track */}
+                <div style={{ width: '100%', height: '10px', background: 'var(--color-bg-subtle)', borderRadius: '6px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${Math.min(100, Math.round((currentOnboardKg / routeData.vehicle_capacity_kg) * 100))}%`,
+                      background: currentOnboardKg > 800 ? 'linear-gradient(90deg, #059669, #10B981)' : '#2563EB',
+                      transition: 'width 0.4s ease'
+                    }}
+                  />
+                </div>
+
+                <div style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{routeData.partner?.company} ({routeData.vehicle_type})</span>
+                  <span>Max Payload: 1,000 kg</span>
+                </div>
+              </div>
+
+              {/* Distance Efficiency */}
+              <div
+                style={{
+                  background: 'white',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px'
+                }}
+              >
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--color-crop)', textTransform: 'uppercase' }}>
+                  Consolidated Distance Saved
+                </span>
+                <div style={{ fontSize: '1.45rem', fontWeight: 900, color: 'var(--color-soil-dark)' }}>
+                  {routeData.metrics?.distance_saved_km} km <span style={{ fontSize: '0.9rem', color: 'var(--color-crop)' }}>({routeData.metrics?.distance_saved_pct}% saved)</span>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
+                  Shared Route: {routeData.metrics?.optimized_route_distance_km} km vs 3 Uncoordinated: {routeData.metrics?.uncoordinated_distance_km} km
+                </div>
+              </div>
+
+              {/* Cost & Carbon Reduction */}
+              <div
+                style={{
+                  background: 'white',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px'
+                }}
+              >
+                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#7C3AED', textTransform: 'uppercase' }}>
+                  Shared Freight & Carbon Savings
+                </span>
+                <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#7C3AED' }}>
+                  ₹{routeData.metrics?.cost_saved_inr} <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>saved ({routeData.metrics?.cost_reduction_pct}%)</span>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
+                  🌿 {routeData.metrics?.co2_saved_kg} kg CO₂ emissions prevented
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STOP-BY-STOP SEQUENCED TIMELINE WITH LIVE OTP VERIFICATION */}
+          <div
+            style={{
+              background: 'white',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <div>
+                <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                  Optimized Stop Sequence & Two-Sided Verification
+                </h4>
+                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                  Driver must collect and input the unique 4-digit OTP at each farmer farmgate and buyer facility to proceed.
+                </div>
+              </div>
+
+              <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#059669', background: '#ECFDF5', border: '1px solid #A7F3D0', padding: '3px 10px', borderRadius: '12px' }}>
+                {routeStops.filter((s) => s.is_verified).length} of {routeStops.length} Milestones Verified
+              </span>
+            </div>
+
+            {/* Stops Timeline List */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {routeStops.map((stop, idx) => {
+                const isOrigin = stop.type === 'ORIGIN';
+                const isPickup = stop.type === 'PICKUP';
+                const isDelivery = stop.type === 'DELIVERY';
+                const isVerified = stop.is_verified;
+
+                return (
+                  <div
+                    key={stop.stop_id}
+                    style={{
+                      border: `1.5px solid ${isVerified ? '#A7F3D0' : isPickup ? '#BAE6FD' : '#DDD6FE'}`,
+                      background: isVerified ? '#F0FDF4' : 'white',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '16px 20px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '14px',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', maxWidth: '650px' }}>
+                      {/* Step Number Circle */}
+                      <div
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '50%',
+                          background: isVerified ? '#059669' : isPickup ? '#0284C7' : '#7C3AED',
+                          color: 'white',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 800,
+                          fontSize: '0.85rem',
+                          flexShrink: 0
+                        }}
+                      >
+                        {isVerified ? <Check size={18} /> : stop.step}
+                      </div>
+
+                      {/* Stop Info */}
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              fontSize: '0.7rem',
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              color: isOrigin ? '#6B7280' : isPickup ? '#0369A1' : '#6D28D9',
+                              background: isOrigin ? '#F3F4F6' : isPickup ? '#E0F2FE' : '#EDE9FE',
+                              padding: '2px 8px',
+                              borderRadius: '4px'
+                            }}
+                          >
+                            {isOrigin ? 'Origin Depot' : isPickup ? '🌾 Farmer Farmgate Pickup' : '🛒 Customer Doorstep Delivery'}
+                          </span>
+
+                          <span style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                            +{stop.distance_leg_km} km leg ({stop.cumulative_distance_km} km total)
+                          </span>
+                        </div>
+
+                        <h5 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: '4px 0 2px 0' }}>
+                          {stop.entity}
+                        </h5>
+
+                        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <MapPin size={13} color="var(--color-crop)" /> {stop.location}
+                        </div>
+
+                        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: isVerified ? '#047857' : 'var(--color-soil-dark)', marginTop: '4px' }}>
+                          {stop.action}
+                        </div>
+
+                        <div style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          📦 Cargo onboard: {stop.cargo_breakdown}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Verification Actions */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                      {isVerified ? (
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '0.78rem',
+                            fontWeight: 800,
+                            color: '#047857',
+                            background: '#ECFDF5',
+                            border: '1px solid #A7F3D0',
+                            padding: '6px 14px',
+                            borderRadius: '8px'
+                          }}
+                        >
+                          <CheckCircle2 size={16} />
+                          {isOrigin ? 'Vehicle Departed' : 'OTP Verified by Driver'}
+                        </div>
+                      ) : (
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            setOtpModalStop(stop);
+                            setRouteOtpInput('');
+                            setRouteOtpError('');
+                            setRouteOtpSuccess('');
+                          }}
+                          style={{
+                            padding: '8px 16px',
+                            fontSize: '0.82rem',
+                            fontWeight: 800,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: isPickup ? '#0284C7' : '#7C3AED',
+                            borderColor: isPickup ? '#0284C7' : '#7C3AED'
+                          }}
+                        >
+                          <KeyRound size={15} />
+                          {isPickup ? "Enter Farmer's Pickup OTP" : "Enter Buyer's Delivery OTP"}
+                        </button>
+                      )}
+
+                      {!isOrigin && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                          {isVerified ? `Verified at ${stop.verified_at}` : `Contact: ${stop.phone}`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* OTP VERIFICATION MODAL */}
+          {otpModalStop && (
+            <div className="modal-overlay" onClick={() => setOtpModalStop(null)}>
+              <div
+                className="modal-card"
+                onClick={(e) => e.stopPropagation()}
+                style={{ maxWidth: '440px', padding: '24px' }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ background: otpModalStop.type === 'PICKUP' ? '#ECFDF5' : '#EFF6FF', color: otpModalStop.type === 'PICKUP' ? '#047857' : '#1E40AF', padding: '6px', borderRadius: '8px', display: 'flex' }}>
+                      <KeyRound size={20} />
+                    </div>
+                    <div>
+                      <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                        {otpModalStop.type === 'PICKUP' ? 'Verify Farmgate Pickup' : 'Verify Doorstep Delivery'}
+                      </h4>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                        {otpModalStop.entity} • {otpModalStop.location}
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => setOtpModalStop(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                    <XCircle size={20} color="var(--color-text-muted)" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleVerifyStopOtp} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ background: 'var(--color-bg-subtle)', padding: '12px 14px', borderRadius: '8px' }}>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
+                      {otpModalStop.type === 'PICKUP'
+                        ? `Please collect the 4-digit Farmgate Pickup OTP directly from ${otpModalStop.entity} before loading produce into the vehicle.`
+                        : `Please collect the 4-digit Doorstep Delivery OTP from ${otpModalStop.entity} upon safe handover of the produce.`}
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" style={{ fontWeight: 800 }}>
+                      Enter 4-Digit {otpModalStop.type === 'PICKUP' ? 'Farmer Pickup' : 'Buyer Delivery'} OTP *
+                    </label>
+                    <input
+                      type="text"
+                      className="nexus-input"
+                      maxLength={4}
+                      placeholder="e.g. 4821"
+                      autoFocus
+                      required
+                      value={routeOtpInput}
+                      onChange={(e) => setRouteOtpInput(e.target.value.replace(/\D/g, ''))}
+                      style={{
+                        textAlign: 'center',
+                        fontSize: '1.5rem',
+                        fontWeight: 900,
+                        letterSpacing: '6px',
+                        fontFamily: 'monospace'
+                      }}
+                    />
+                  </div>
+
+                  {routeOtpError && (
+                    <div
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        background: '#FEF2F2',
+                        color: '#DC2626',
+                        border: '1px solid #FECACA'
+                      }}
+                    >
+                      {routeOtpError}
+                    </div>
+                  )}
+
+                  {routeOtpSuccess && (
+                    <div
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        background: '#ECFDF5',
+                        color: '#047857',
+                        border: '1px solid #A7F3D0'
+                      }}
+                    >
+                      {routeOtpSuccess}
+                    </div>
+                  )}
+
+                  {/* Simulator Quick Helper Button */}
+                  <button
+                    type="button"
+                    onClick={() => setRouteOtpInput(otpModalStop.otp)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#2563EB',
+                      fontSize: '0.74rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      padding: 0
+                    }}
+                  >
+                    💡 Simulator Quick-Fill: Auto-insert {otpModalStop.entity}'s code ({otpModalStop.otp})
+                  </button>
+
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setOtpModalStop(null)}
+                      style={{ flex: 1, padding: '10px 0', fontWeight: 700 }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={verifyingStopOtp || routeOtpInput.length !== 4}
+                      style={{
+                        flex: 2,
+                        padding: '10px 0',
+                        fontWeight: 800,
+                        background: otpModalStop.type === 'PICKUP' ? '#0284C7' : '#7C3AED',
+                        borderColor: otpModalStop.type === 'PICKUP' ? '#0284C7' : '#7C3AED'
+                      }}
+                    >
+                      {verifyingStopOtp ? 'Validating Code...' : 'Verify Stop & Update Vehicle'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* CREATE LIVE ORDER MODAL */}
+          {showCreateOrderModal && (
+            <div className="modal-overlay" onClick={() => setShowCreateOrderModal(false)}>
+              <div
+                className="modal-card"
+                onClick={(e) => e.stopPropagation()}
+                style={{ maxWidth: '480px', padding: '24px' }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ background: '#ECFDF5', color: '#059669', padding: '6px', borderRadius: '8px', display: 'flex' }}>
+                      <PlusCircle size={20} />
+                    </div>
+                    <div>
+                      <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                        Create Real Delivery Order
+                      </h4>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                        Creates live database order with auto-generated secure OTPs
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowCreateOrderModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                    <XCircle size={20} color="var(--color-text-muted)" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreateLiveOrder} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 700 }}>Farmer Name *</label>
+                      <input
+                        type="text"
+                        className="nexus-input"
+                        required
+                        placeholder="e.g. Ramesh Patel"
+                        value={newOrderForm.farmer_name}
+                        onChange={(e) => setNewOrderForm({ ...newOrderForm, farmer_name: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 700 }}>Pickup Location *</label>
+                      <input
+                        type="text"
+                        className="nexus-input"
+                        required
+                        placeholder="e.g. Sanand, Ahmedabad"
+                        value={newOrderForm.pickup_location}
+                        onChange={(e) => setNewOrderForm({ ...newOrderForm, pickup_location: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 700 }}>Crop / Commodity *</label>
+                      <select
+                        className="nexus-select"
+                        value={newOrderForm.crop}
+                        onChange={(e) => setNewOrderForm({ ...newOrderForm, crop: e.target.value })}
+                      >
+                        <option value="Tomato">Tomato (Perishable)</option>
+                        <option value="Potato">Potato</option>
+                        <option value="Onion">Onion</option>
+                        <option value="Wheat">Wheat</option>
+                        <option value="Banana">Banana (Perishable)</option>
+                        <option value="Cotton">Cotton</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 700 }}>Quantity (kg) *</label>
+                      <input
+                        type="number"
+                        min="10"
+                        max="1000"
+                        className="nexus-input"
+                        required
+                        value={newOrderForm.quantity_kg}
+                        onChange={(e) => setNewOrderForm({ ...newOrderForm, quantity_kg: Number(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 700 }}>Buyer / Customer Name *</label>
+                      <input
+                        type="text"
+                        className="nexus-input"
+                        required
+                        placeholder="e.g. Ahmedabad Retail Mart"
+                        value={newOrderForm.buyer_name}
+                        onChange={(e) => setNewOrderForm({ ...newOrderForm, buyer_name: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 700 }}>Delivery Destination *</label>
+                      <input
+                        type="text"
+                        className="nexus-input"
+                        required
+                        placeholder="e.g. Vastrapur, Ahmedabad"
+                        value={newOrderForm.destination}
+                        onChange={(e) => setNewOrderForm({ ...newOrderForm, destination: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setShowCreateOrderModal(false)}
+                      style={{ flex: 1, padding: '10px 0', fontWeight: 700 }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={creatingOrder}
+                      style={{ flex: 2, padding: '10px 0', fontWeight: 800 }}
+                    >
+                      {creatingOrder ? 'Creating & Generating OTPs...' : 'Create Live Order & Add to Route'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ========================================================================= */}
