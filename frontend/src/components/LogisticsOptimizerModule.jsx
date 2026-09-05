@@ -31,14 +31,8 @@ import {
 } from 'lucide-react';
 import DeliveryStatusPanel from './DeliveryStatusPanel.jsx';
 
-export default function LogisticsOptimizerModule() {
+export default function LogisticsOptimizerModule({ user }) {
   const [activeSubTab, setActiveSubTab] = useState('live-orders'); // 'live-orders', 'matching', 'fleet'
-  const [vehicleType, setVehicleType] = useState('Mini Truck (Tata Ace)');
-  const [vehicleCapacity, setVehicleCapacity] = useState(1000);
-  const [ratePerKm, setRatePerKm] = useState(24.0);
-
-  const [routeData, setRouteData] = useState(null);
-  const [loading, setLoading] = useState(false);
 
   // Dynamic Matching & Live Deliveries State
   const [liveDeliveries, setLiveDeliveries] = useState([]);
@@ -46,7 +40,6 @@ export default function LogisticsOptimizerModule() {
   const [dynamicCandidates, setDynamicCandidates] = useState([]);
   const [loadingDynamic, setLoadingDynamic] = useState(false);
   const [assignMessage, setAssignMessage] = useState('');
-  const [customSimLoad, setCustomSimLoad] = useState(500);
 
   // Fleet state
   const [fleetList, setFleetList] = useState([]);
@@ -62,30 +55,45 @@ export default function LogisticsOptimizerModule() {
   });
   const [registering, setRegistering] = useState(false);
 
-  // Fetch Live Orders
+  // Fetch Live Orders scoped to carrier or unassigned
   const fetchLiveDeliveries = () => {
-    fetch('/api/deliveries?role=logistics')
+    const carrierParam = user?.organization || user?.name || user?.email ? `&stakeholder=${encodeURIComponent(user.organization || user.name || user.email)}` : '';
+    fetch(`/api/deliveries?role=logistics${carrierParam}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.deliveries) {
           const valid = data.deliveries.filter(
-            (d) => !(d.farmer_name || '').toLowerCase().includes('test')
+            (d) => !(d.farmer_name || '').toLowerCase().includes('test') &&
+                   !(d.buyer_name || '').toLowerCase().includes('test') &&
+                   d.reference !== 'ADH-1001' &&
+                   (d.farmer_name || '').toLowerCase() !== 'matched farmer'
           );
           setLiveDeliveries(valid);
-          if (valid.length > 0 && !selectedOrderRef) {
-            setSelectedOrderRef(valid[0].reference);
+          if (valid.length > 0) {
+            setSelectedOrderRef((prev) => prev && valid.some((v) => v.reference === prev) ? prev : valid[0].reference);
+          } else {
+            setSelectedOrderRef('');
+            setDynamicCandidates([]);
           }
         }
       })
       .catch((err) => console.error('Error fetching deliveries:', err));
   };
 
-  // Run Dynamic Vehicle Matching
+  // Run Dynamic Vehicle Matching on Genuine Orders
   const runDynamicVehicleMatch = (orderRef) => {
+    if (!liveDeliveries || liveDeliveries.length === 0) {
+      setDynamicCandidates([]);
+      return;
+    }
     const targetOrder = liveDeliveries.find((d) => d.reference === orderRef) || liveDeliveries[0];
-    const loadKg = targetOrder ? targetOrder.quantity_kg : customSimLoad;
-    const pickupLoc = targetOrder ? targetOrder.pickup_location : 'Ahmedabad';
-    const dropLoc = targetOrder ? targetOrder.destination : 'Ahmedabad';
+    if (!targetOrder) {
+      setDynamicCandidates([]);
+      return;
+    }
+    const loadKg = targetOrder.quantity_kg;
+    const pickupLoc = targetOrder.pickup_location || 'Ahmedabad';
+    const dropLoc = targetOrder.destination || 'Ahmedabad';
 
     setLoadingDynamic(true);
     setAssignMessage('');
@@ -108,27 +116,6 @@ export default function LogisticsOptimizerModule() {
       .finally(() => setLoadingDynamic(false));
   };
 
-  // Fetch Route Data
-  const fetchOptimizedRoute = () => {
-    setLoading(true);
-    fetch('/api/route-optimize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        vehicle_capacity_kg: Number(vehicleCapacity),
-        cost_per_km: Number(ratePerKm)
-      })
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setRouteData(data.data);
-        }
-      })
-      .catch((err) => console.error('Error fetching route:', err))
-      .finally(() => setLoading(false));
-  };
-
   // Fetch Fleet
   const fetchFleet = () => {
     setLoadingFleet(true);
@@ -144,16 +131,15 @@ export default function LogisticsOptimizerModule() {
   };
 
   useEffect(() => {
-    fetchOptimizedRoute();
     fetchFleet();
     fetchLiveDeliveries();
-  }, [vehicleCapacity, ratePerKm]);
+  }, []);
 
   useEffect(() => {
-    if (activeSubTab === 'matching') {
+    if (activeSubTab === 'matching' && selectedOrderRef) {
       runDynamicVehicleMatch(selectedOrderRef);
     }
-  }, [activeSubTab, selectedOrderRef, customSimLoad]);
+  }, [activeSubTab, selectedOrderRef]);
 
   // Handle Partner Registration
   const handleRegisterPartner = (e) => {
@@ -198,7 +184,7 @@ export default function LogisticsOptimizerModule() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           logistics_name: vehicle.company,
-          vehicle_number: vehicle.vehicle_number || 'GJ-01-ET-8412',
+          vehicle_number: vehicle.vehicle_number || 'Fleet Vehicle',
           current_location: `Carrier ${vehicle.company} dispatched for produce pickup at ${targetOrder.pickup_location}`
         })
       });
@@ -319,7 +305,11 @@ export default function LogisticsOptimizerModule() {
       {/* SUB-TAB 0: LIVE BUYER-FARMER ORDERS & LOGISTICS DISPATCH TRACKING         */}
       {/* ========================================================================= */}
       {activeSubTab === 'live-orders' && (
-        <DeliveryStatusPanel role="logistics" stakeholder="ABC Logistics" />
+        <DeliveryStatusPanel
+          role="logistics"
+          stakeholder={user?.organization || user?.name || user?.email || 'Logistics Partner'}
+          user={user}
+        />
       )}
 
       {/* ========================================================================= */}
@@ -393,8 +383,9 @@ export default function LogisticsOptimizerModule() {
                   ))}
                 </select>
               ) : (
-                <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', padding: '6px 0' }}>
-                  No pending orders currently in queue. Using standard produce simulation (500 kg from Ahmedabad).
+                <div style={{ fontSize: '0.84rem', color: 'var(--color-text-secondary)', padding: '10px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Clock size={16} color="var(--color-text-muted)" />
+                  <span>No active delivery orders currently pending in your queue. When buyers place orders in the Marketplace, orders will appear here for dynamic fleet matching.</span>
                 </div>
               )}
 
@@ -417,78 +408,86 @@ export default function LogisticsOptimizerModule() {
           </div>
 
           {/* Dynamic Candidate Vehicles List */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '16px' }}>
-            {dynamicCandidates.map((veh, idx) => {
-              const isBest = idx === 0;
-              return (
-                <div
-                  key={veh.id}
-                  style={{
-                    background: 'white',
-                    border: `2px solid ${isBest ? 'var(--color-crop)' : 'var(--color-border)'}`,
-                    borderRadius: 'var(--radius-md)',
-                    padding: '20px',
-                    boxShadow: isBest ? 'var(--shadow-md)' : 'none',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    position: 'relative'
-                  }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <span style={{ fontSize: '0.78rem', fontWeight: 800, color: veh.status_color || 'var(--color-crop)' }}>
-                        {veh.badge}
-                      </span>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-muted)' }}>
-                        ~{veh.distance_km} km proximity
-                      </span>
-                    </div>
-
-                    <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
-                      {veh.company}
-                    </h4>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                      {veh.vehicle_type} • <strong>{veh.vehicle_number}</strong>
-                    </div>
-
-                    <div style={{ margin: '14px 0', background: 'var(--color-bg-subtle)', padding: '10px 12px', borderRadius: '6px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                      <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Capacity</div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>{veh.capacity_kg} kg</div>
+          {liveDeliveries.length > 0 && dynamicCandidates.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '16px' }}>
+              {dynamicCandidates.map((veh, idx) => {
+                const isBest = idx === 0;
+                return (
+                  <div
+                    key={veh.id}
+                    style={{
+                      background: 'white',
+                      border: `2px solid ${isBest ? 'var(--color-crop)' : 'var(--color-border)'}`,
+                      borderRadius: 'var(--radius-md)',
+                      padding: '20px',
+                      boxShadow: isBest ? 'var(--shadow-md)' : 'none',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      position: 'relative'
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 800, color: veh.status_color || 'var(--color-crop)' }}>
+                          {veh.badge}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-muted)' }}>
+                          ~{veh.distance_km} km proximity
+                        </span>
                       </div>
-                      <div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Reliability Score</div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#7C3AED' }}>{veh.reliability_score}/100 ⭐</div>
+
+                      <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-soil-dark)', margin: 0 }}>
+                        {veh.company}
+                      </h4>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                        {veh.vehicle_type} {veh.vehicle_number ? `• ${veh.vehicle_number}` : ''}
+                      </div>
+
+                      <div style={{ margin: '14px 0', background: 'var(--color-bg-subtle)', padding: '10px 12px', borderRadius: '6px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Capacity</div>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--color-soil-dark)' }}>{veh.capacity_kg} kg</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Reliability Score</div>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#7C3AED' }}>{veh.reliability_score}/100 ⭐</div>
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: '0.78rem', color: isBest ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)', lineHeight: 1.45 }}>
+                        <strong>AI Evaluation:</strong> {veh.match_reason}
                       </div>
                     </div>
 
-                    <div style={{ fontSize: '0.78rem', color: isBest ? 'var(--color-soil-dark)' : 'var(--color-text-secondary)', lineHeight: 1.45 }}>
-                      <strong>AI Evaluation:</strong> {veh.match_reason}
+                    <div style={{ marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
+                      <button
+                        className="btn-primary"
+                        onClick={() => handleAssignVehicle(veh)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          fontSize: '0.8rem',
+                          fontWeight: 800,
+                          background: isBest ? 'var(--color-crop)' : '#2563EB',
+                          borderColor: isBest ? 'var(--color-crop)' : '#2563EB',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <Truck size={14} /> Assign {veh.company} to Order
+                      </button>
                     </div>
                   </div>
-
-                  <div style={{ marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
-                    <button
-                      className="btn-primary"
-                      onClick={() => handleAssignVehicle(veh)}
-                      style={{
-                        width: '100%',
-                        padding: '8px 12px',
-                        fontSize: '0.8rem',
-                        fontWeight: 800,
-                        background: isBest ? 'var(--color-crop)' : '#2563EB',
-                        borderColor: isBest ? 'var(--color-crop)' : '#2563EB',
-                        justifyContent: 'center'
-                      }}
-                    >
-                      <Truck size={14} /> Assign {veh.company} to Order
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : liveDeliveries.length === 0 ? (
+            <div style={{ background: 'white', border: '1px dashed var(--color-border)', borderRadius: 'var(--radius-md)', padding: '40px 20px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+              <Truck size={36} color="var(--color-text-muted)" style={{ margin: '0 auto 12px auto' }} />
+              <h4 style={{ margin: '0 0 6px 0', color: 'var(--color-soil-dark)', fontSize: '1.05rem', fontWeight: 700 }}>No Orders Available for Matching</h4>
+              <p style={{ margin: 0, fontSize: '0.85rem' }}>Once an active order is placed in Marketplace, the AI engine will dynamically rank your fleet by load capacity, farm proximity, and reliability score.</p>
+            </div>
+          ) : null}
         </div>
       )}
 

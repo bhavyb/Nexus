@@ -29,7 +29,7 @@ const LOCATION_PRESETS = [
   '🏪 Arrived at Buyer Facility / Doorstep'
 ];
 
-export default function DeliveryStatusPanel({ role, stakeholder }) {
+export default function DeliveryStatusPanel({ role, stakeholder, user }) {
   const { t } = useLanguage();
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -46,10 +46,11 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
 
   const load = async () => {
     try {
-      const isScopedRole = role === 'customer' || role === 'farmer';
+      const isScopedRole = role === 'customer' || role === 'farmer' || role === 'logistics';
+      const activeStakeholder = stakeholder || user?.organization || user?.name || user?.email || '';
       const query = isScopedRole
-        ? `?role=${encodeURIComponent(role)}&stakeholder=${encodeURIComponent(stakeholder || '')}`
-        : (role === 'logistics' ? '?role=logistics' : '?all=true');
+        ? `?role=${encodeURIComponent(role)}&stakeholder=${encodeURIComponent(activeStakeholder)}`
+        : '?all=true';
       const response = await fetch(`/api/deliveries${query}`);
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Unable to load deliveries');
@@ -116,19 +117,21 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
   const acceptDelivery = async (delivery) => {
     setUpdating(delivery.reference);
     try {
-      const carrierName = stakeholder && stakeholder !== 'Logistics partner' ? stakeholder : 'ABC Logistics';
+      const carrierName = user?.organization || user?.name || user?.email || (stakeholder && stakeholder !== 'Logistics partner' ? stakeholder : 'Driver');
       const response = await fetch(`/api/deliveries/${delivery.reference}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          logistics_id: user?.id || null,
           logistics_name: carrierName,
-          vehicle_number: 'GJ-01-ET-8412',
+          vehicle_number: user?.vehicle_number || 'Fleet Vehicle',
           current_location: `Carrier ${carrierName} dispatched to ${delivery.pickup_location}`
         })
       });
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Unable to accept delivery');
       setDeliveries((current) => current.map((item) => (item.reference === delivery.reference ? data.delivery : item)));
+      load();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -172,7 +175,9 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
       (d.farmer_name || '').toLowerCase().includes('test') ||
       (d.buyer_name || '').toLowerCase().includes('test') ||
       (d.pickup_location || '').toLowerCase().includes('test') ||
-      (d.destination || '').toLowerCase().includes('test');
+      (d.destination || '').toLowerCase().includes('test') ||
+      d.reference === 'ADH-1001' ||
+      (d.farmer_name || '').toLowerCase() === 'matched farmer';
     if (isTest) return false;
 
     if (!searchQuery.trim()) return true;
@@ -290,6 +295,17 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {isLogistics && (
+                    delivery.status === 'Assigned' ? (
+                      <span style={{ fontSize: '0.74rem', background: '#FEF3C7', color: '#B45309', padding: '4px 10px', borderRadius: '10px', fontWeight: 700 }}>
+                        ⚡ Open for Acceptance
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.74rem', background: '#ECFDF5', color: '#065F46', padding: '4px 10px', borderRadius: '10px', fontWeight: 700 }}>
+                        🔒 Claimed by You ({delivery.logistics_name})
+                      </span>
+                    )
+                  )}
                   <span
                     style={{
                       fontSize: '0.8rem',
@@ -335,7 +351,7 @@ export default function DeliveryStatusPanel({ role, stakeholder }) {
 
                 <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)', textAlign: 'right' }}>
                   <div>🚚 <strong>Carrier:</strong> {delivery.logistics_name}</div>
-                  <div>🚗 <strong>Vehicle:</strong> {delivery.vehicle_number || 'GJ-01-ET-8412'}</div>
+                  <div>🚗 <strong>Vehicle:</strong> {delivery.vehicle_number || (delivery.status === 'Assigned' ? 'Awaiting Carrier' : 'Fleet Vehicle')}</div>
                   {delivery.updated_at && <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>Updated: {delivery.updated_at}</div>}
                 </div>
               </div>

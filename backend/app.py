@@ -148,9 +148,9 @@ def api_deliveries():
         role = request.args.get("role")
         stakeholder = request.args.get("stakeholder") or request.args.get("name")
         all_deliveries = request.args.get("all", "").lower() in ("true", "1")
-        # ONLY logistics or unauthenticated overview can see all deliveries;
-        # farmer and customer must strictly see only their own orders!
-        if (all_deliveries or role == "logistics") and role not in ("farmer", "customer"):
+        # ONLY unauthenticated overview with explicit all=true can see all deliveries;
+        # logistics, farmer, and customer must strictly see only their own relevant orders!
+        if all_deliveries and not role:
             return jsonify({"success": True, "deliveries": get_delivery_updates(role=None, stakeholder=None)})
         return jsonify({"success": True, "deliveries": get_delivery_updates(role, stakeholder)})
     payload = request.get_json(force=True, silent=True) or {}

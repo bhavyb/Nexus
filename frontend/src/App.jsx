@@ -316,7 +316,7 @@ function AppContent() {
 
             {/* 6. Shared Logistics & Route Optimizer */}
             {activeTab === 'logistics' && (
-              <LogisticsOptimizerModule />
+              <LogisticsOptimizerModule user={user} />
             )}
 
             {/* Deep Analytical Tools */}

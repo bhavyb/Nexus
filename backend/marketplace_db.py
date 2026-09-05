@@ -838,7 +838,9 @@ def get_delivery_updates(role: Optional[str] = None, stakeholder: Optional[str] 
         "LOWER(farmer_name) NOT LIKE '%test%'",
         "LOWER(buyer_name) NOT LIKE '%test%'",
         "LOWER(pickup_location) NOT LIKE '%test%'",
-        "LOWER(destination) NOT LIKE '%test%'"
+        "LOWER(destination) NOT LIKE '%test%'",
+        "reference != 'ADH-1001'",
+        "LOWER(farmer_name) != 'matched farmer'"
     ]
     params: List[Any] = []
     normalized_role = (role or "").strip().lower()
@@ -896,10 +898,45 @@ def get_delivery_updates(role: Optional[str] = None, stakeholder: Optional[str] 
         # If no stakeholder name was supplied, do not leak other users' orders
         where_clauses.append("1 = 0")
     elif normalized_role == "logistics":
-        # Logistics sees all network orders to manage dispatches, or can filter by carrier name
-        if stakeholder and stakeholder.strip() and stakeholder.lower() not in {"logistics", "all", "logistics partner", "fleet view"}:
-            where_clauses.append("(status = 'Assigned' OR LOWER(logistics_name) LIKE LOWER(?))")
-            params.append(f"%{stakeholder.strip()}%")
+        if stakeholder and stakeholder.strip() and stakeholder.lower() not in {"all", "fleet view"}:
+            clean_carrier = stakeholder.strip()
+            aliases = [clean_carrier]
+            u_id = None
+            with get_db_connection() as conn:
+                u = conn.execute(
+                    "SELECT id, name, organization, email FROM users WHERE LOWER(name) = LOWER(?) OR LOWER(organization) = LOWER(?) OR LOWER(email) = LOWER(?)",
+                    (clean_carrier, clean_carrier, clean_carrier)
+                ).fetchone()
+                if u:
+                    u_id = u["id"]
+                    for field_val in (u["name"], u["organization"], u["email"]):
+                        if field_val and field_val.strip() and field_val.strip() not in aliases:
+                            aliases.append(field_val.strip())
+                f_rows = conn.execute(
+                    "SELECT id, company FROM logistics_fleet WHERE LOWER(company) = LOWER(?)",
+                    (clean_carrier,)
+                ).fetchall()
+                for f_row in f_rows:
+                    if f_row["company"] and f_row["company"].strip() not in aliases:
+                        aliases.append(f_row["company"].strip())
+
+            carrier_conditions = []
+            for alias in aliases:
+                carrier_conditions.append("LOWER(logistics_name) = LOWER(?)")
+                params.append(alias)
+                carrier_conditions.append("LOWER(logistics_name) LIKE LOWER(?)")
+                params.append(f"%{alias}%")
+            if u_id is not None:
+                carrier_conditions.append("logistics_id = ?")
+                params.append(u_id)
+
+            # Strict isolation rule:
+            # 1. Unaccepted orders (waiting for a driver to accept): status = 'Assigned' AND logistics_name is Unassigned
+            # 2. Orders accepted by THIS carrier (matches aliases or u_id)
+            # Once another driver accepts an order, its status is no longer Unassigned and its logistics_name
+            # is set to that driver, so other drivers CANNOT see it anymore!
+            unassigned_cond = "(status = 'Assigned' AND (logistics_name IS NULL OR logistics_name = '' OR LOWER(logistics_name) = 'unassigned'))"
+            where_clauses.append(f"({unassigned_cond} OR ({' OR '.join(carrier_conditions)}))")
 
     query = "SELECT * FROM delivery_updates"
     if where_clauses:
@@ -998,7 +1035,7 @@ def accept_delivery(
         if not existing:
             return None
         loc = current_location.strip() or f"Carrier {logistics_name.strip()} dispatched to farm gate for pickup"
-        veh = vehicle_number.strip() or existing["vehicle_number"] or "GJ-01-ET-8412"
+        veh = vehicle_number.strip() or existing["vehicle_number"] or "Fleet Vehicle"
         cursor.execute(
             """UPDATE delivery_updates
                SET status = 'Accepted', logistics_id = COALESCE(?, logistics_id),
@@ -1071,28 +1108,8 @@ def update_delivery_status(
 
 
 def seed_delivery_updates_if_empty() -> None:
-    """Provides initial shared live deliveries so each portal has connected status data."""
-    with get_db_connection() as conn:
-        if conn.execute("SELECT COUNT(*) FROM delivery_updates").fetchone()[0]:
-            return
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute(
-            """
-            INSERT INTO delivery_updates
-                (reference, crop, quantity_kg, farmer_name, buyer_name, logistics_name,
-                 pickup_location, destination, status, updated_at, current_location, vehicle_number, eta,
-                 pickup_otp, delivery_otp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "ADH-1001", "Tomato", 500, "Gujarat Agro Collective",
-                "FreshBasket Retail", "ABC Logistics", "Gondal Farm Gate",
-                "Ahmedabad Distribution Hub", "In Transit", now,
-                "En route on SG Highway (near Prahlad Nagar)", "GJ-01-ET-8412", "Today 03:30 PM",
-                "4821", "7395"
-            ),
-        )
-        conn.commit()
+    """No dummy deliveries are seeded; deliveries are created dynamically through marketplace orders."""
+    pass
 
 
 def seed_logistics_fleet_if_empty():

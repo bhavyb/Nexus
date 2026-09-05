@@ -186,7 +186,7 @@ export default function MarketplaceModule({ user, commodities = [], locationsDat
       destination: orderFormData.delivery_location,
       listing_id: orderListing.id,
       current_location: `Order Placed - Awaiting carrier dispatch at ${orderListing.location}`,
-      vehicle_number: 'GJ-01-ET-8412',
+      vehicle_number: '',
       eta: 'Estimated 2-4 hours'
     };
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowRight,
   BarChart3,
@@ -16,6 +16,37 @@ import { useLanguage } from '../context/LanguageContext.jsx';
 
 export default function StakeholderDashboard({ user, onNavigate }) {
   const { t } = useLanguage();
+  const [logisticsStats, setLogisticsStats] = useState({
+    activeTrips: 0,
+    deliveredTrips: 0,
+    fleetStatus: 'Ready for Dispatch'
+  });
+
+  useEffect(() => {
+    if (user?.role === 'logistics') {
+      const carrierParam = user?.organization || user?.name || user?.email ? `&stakeholder=${encodeURIComponent(user.organization || user.name || user.email)}` : '';
+      fetch(`/api/deliveries?role=logistics${carrierParam}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.deliveries) {
+            const deliveries = data.deliveries.filter(
+              (d) => !(d.farmer_name || '').toLowerCase().includes('test') &&
+                     !(d.buyer_name || '').toLowerCase().includes('test') &&
+                     d.reference !== 'ADH-1001' &&
+                     (d.farmer_name || '').toLowerCase() !== 'matched farmer'
+            );
+            const active = deliveries.filter((d) => d.status !== 'Delivered').length;
+            const delivered = deliveries.filter((d) => d.status === 'Delivered').length;
+            setLogisticsStats({
+              activeTrips: active,
+              deliveredTrips: delivered,
+              fleetStatus: active > 0 ? `${active} En Route` : 'Available for Orders'
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [user]);
 
   const roleConfigs = {
     farmer: {
@@ -58,9 +89,9 @@ export default function StakeholderDashboard({ user, onNavigate }) {
         ['logistics', t('actionReviewAssignments')]
       ],
       stats: [
-        [t('activeDispatches'), '16 Trips'],
-        [t('onTimeRate'), '98.2%'],
-        [t('sharedFuelSavings'), '24.8%']
+        [t('activeDispatches'), `${logisticsStats.activeTrips} Trips`],
+        [t('completedDeliveries', 'Completed Deliveries'), `${logisticsStats.deliveredTrips} Delivered`],
+        [t('fleetStatus', 'Fleet Status'), logisticsStats.fleetStatus]
       ]
     }
   };
@@ -227,7 +258,11 @@ export default function StakeholderDashboard({ user, onNavigate }) {
       </div>
 
       {/* 5. Live Orders & Delivery Tracking */}
-      <DeliveryStatusPanel role={user?.role} stakeholder={user?.name || user?.email} />
+      <DeliveryStatusPanel
+        role={user?.role}
+        stakeholder={user?.organization || user?.name || user?.email}
+        user={user}
+      />
     </div>
   );
 }
