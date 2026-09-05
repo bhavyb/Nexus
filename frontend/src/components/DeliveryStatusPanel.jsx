@@ -203,15 +203,15 @@ export default function DeliveryStatusPanel({ role, stakeholder, user }) {
               {role === 'customer'
                 ? t('myPurchasesTitle')
                 : role === 'farmer'
-                ? t('myFarmgateOrdersTitle')
-                : t('logisticsOpsTitle')}
+                  ? t('myFarmgateOrdersTitle')
+                  : t('logisticsOpsTitle')}
             </h2>
             <p className="card-subtitle" style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '2px 0 0 0' }}>
               {role === 'customer'
                 ? 'Tracking your fresh produce shipments, carrier vehicle details, and real-time locations.'
                 : role === 'farmer'
-                ? 'Orders placed for your harvest lots and incoming vehicle pickup status.'
-                : 'Accept incoming farmer-to-buyer orders and publish live location & milestone updates.'}
+                  ? 'Orders placed for your harvest lots and incoming vehicle pickup status.'
+                  : 'Accept incoming farmer-to-buyer orders and publish live location & milestone updates.'}
             </p>
           </div>
         </div>
@@ -520,18 +520,18 @@ export default function DeliveryStatusPanel({ role, stakeholder, user }) {
               {isLogistics && (
                 <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--color-soil-dark)', textTransform: 'uppercase' }}>
                         Driver Operations & Verification Controls
                       </span>
-                      {delivery.status === 'Accepted' && (
-                        <span style={{ fontSize: '0.7rem', color: '#047857', background: '#ECFDF5', border: '1px solid #A7F3D0', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
-                          🔒 Requires Farmer Pickup OTP
+                      {delivery.demo_pickup_otp && delivery.status === 'Accepted' && (
+                        <span style={{ fontSize: '0.7rem', color: '#6B7280', background: '#F3F4F6', padding: '2px 6px', borderRadius: '4px' }}>
+                          (Farmer OTP: <strong>{delivery.demo_pickup_otp}</strong>)
                         </span>
                       )}
-                      {delivery.status === 'In Transit' && (
-                        <span style={{ fontSize: '0.7rem', color: '#1E40AF', background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
-                          🔒 Requires Buyer Delivery OTP
+                      {delivery.demo_delivery_otp && delivery.status === 'In Transit' && (
+                        <span style={{ fontSize: '0.7rem', color: '#6B7280', background: '#F3F4F6', padding: '2px 6px', borderRadius: '4px' }}>
+                          (Buyer OTP: <strong>{delivery.demo_delivery_otp}</strong>)
                         </span>
                       )}
                     </div>

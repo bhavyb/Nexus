@@ -184,22 +184,11 @@ def api_get_delivery(reference: str):
     delivery = get_delivery_by_reference(reference)
     if not delivery:
         return jsonify({"success": False, "error": "Delivery not found"}), 404
-    delivery.pop("demo_pickup_otp", None)
-    delivery.pop("demo_delivery_otp", None)
     role = request.args.get("role", "").strip().lower()
-    stakeholder = (request.args.get("stakeholder") or "").strip().lower()
     if role == "farmer":
         delivery["delivery_otp"] = ""
-        if stakeholder and stakeholder not in delivery.get("farmer_name", "").lower():
-            delivery["pickup_otp"] = ""
-    elif role in ("customer", "buyer"):
+    elif role == "customer":
         delivery["pickup_otp"] = ""
-        if stakeholder and stakeholder not in delivery.get("buyer_name", "").lower():
-            delivery["delivery_otp"] = ""
-    else:
-        # Logistics, drivers, or public never see secret OTPs
-        delivery["pickup_otp"] = ""
-        delivery["delivery_otp"] = ""
     return jsonify({"success": True, "delivery": delivery})
 
 
@@ -217,10 +206,6 @@ def api_accept_delivery(reference: str):
         )
         if not delivery:
             return jsonify({"success": False, "error": "Delivery is already claimed or not found"}), 409
-        delivery["pickup_otp"] = ""
-        delivery["delivery_otp"] = ""
-        delivery.pop("demo_pickup_otp", None)
-        delivery.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": delivery})
     except (TypeError, ValueError) as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -240,10 +225,6 @@ def api_delivery_status(reference: str):
         )
         if not delivery:
             return jsonify({"success": False, "error": "Delivery not found"}), 404
-        delivery["pickup_otp"] = ""
-        delivery["delivery_otp"] = ""
-        delivery.pop("demo_pickup_otp", None)
-        delivery.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": delivery})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -258,11 +239,6 @@ def api_delivery_verify_pickup(reference: str):
         return jsonify({"success": False, "error": "Please provide the 4-digit Farmer Pickup OTP"}), 400
     try:
         updated = verify_delivery_pickup(reference, otp)
-        if updated:
-            updated["pickup_otp"] = ""
-            updated["delivery_otp"] = ""
-            updated.pop("demo_pickup_otp", None)
-            updated.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": updated, "message": "Pickup successfully verified with Farmer OTP!"})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -280,11 +256,6 @@ def api_delivery_verify_delivery(reference: str):
         return jsonify({"success": False, "error": "Please provide the 4-digit Buyer Delivery OTP"}), 400
     try:
         updated = verify_delivery_dropoff(reference, otp)
-        if updated:
-            updated["pickup_otp"] = ""
-            updated["delivery_otp"] = ""
-            updated.pop("demo_pickup_otp", None)
-            updated.pop("demo_delivery_otp", None)
         return jsonify({"success": True, "delivery": updated, "message": "Delivery successfully verified with Customer OTP!"})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
@@ -870,33 +841,24 @@ def api_logistics_dynamic_match():
 # 6. CAPACITATED ROUTE OPTIMIZATION & SHARED LOGISTICS
 # -----------------------------------------------------------------------------
 
-@app.route("/api/route-optimize", methods=["GET", "POST"])
+@app.route("/api/route-optimize", methods=["POST"])
 def api_route_optimize():
     """
-    GET/POST /api/route-optimize
-    Solves shared vehicle routing (multi-pickup, multi-drop) and returns distance/cost/CO2 savings,
-    stop sequences, capacity constraints, benchmark comparisons, and farmer net realization uplift.
+    POST /api/route-optimize
+    Solves shared vehicle routing (multi-pickup, multi-drop) and returns distance/cost/CO2 savings.
     """
-    if request.method == "POST":
-        payload = request.get_json(force=True, silent=True) or {}
-    else:
-        payload = request.args.to_dict()
-
+    payload = request.get_json(force=True, silent=True) or {}
     vehicle_cap = float(payload.get("vehicle_capacity_kg", 1000.0))
     cost_km = float(payload.get("cost_per_km", 24.0))
     pickups = payload.get("pickups")
     deliveries = payload.get("deliveries")
-    destination = payload.get("destination")
-    depot_location = payload.get("depot_location")
 
     try:
         route_data = optimize_shared_logistics_route(
             pickups=pickups,
             deliveries=deliveries,
-            destination=destination,
             vehicle_capacity_kg=vehicle_cap,
-            cost_per_km=cost_km,
-            depot_location=depot_location
+            cost_per_km=cost_km
         )
         return jsonify({"success": True, "data": route_data})
     except Exception as e:

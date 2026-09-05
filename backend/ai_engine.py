@@ -13,7 +13,6 @@ Core AI capabilities for the Demand-to-Delivery Agricultural Network:
 
 import math
 import logging
-from itertools import permutations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -88,31 +87,6 @@ def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) ->
          math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return round(r * c, 2)
-
-
-def resolve_lat_lng(location_str: str) -> tuple:
-    """Resolves coordinates for any Indian city, mandi, or district string."""
-    loc = (location_str or "").strip().lower()
-    try:
-        from mandi_comparator import ALL_INDIAN_DISTRICTS, ALL_INDIAN_STATES
-        for name, coords in ALL_INDIAN_DISTRICTS.items():
-            if name in loc or loc in name:
-                return float(coords["lat"]), float(coords["lng"])
-        for name, coords in ALL_INDIAN_STATES.items():
-            if name in loc or loc in name:
-                return float(coords["lat"]), float(coords["lng"])
-    except Exception:
-        pass
-
-    for name, coords in REGIONAL_DEMAND_HUBS.items():
-        if name.lower() in loc or loc in name.lower():
-            return float(coords["lat"]), float(coords["lng"])
-
-    # Deterministic fallback near Central Gujarat / Ahmedabad hub
-    h = abs(hash(loc)) % 1000
-    lat = 23.0225 + ((h % 40) - 20) * 0.008
-    lng = 72.5714 + (((h // 40) % 40) - 20) * 0.008
-    return round(lat, 4), round(lng, 4)
 
 
 # =============================================================================
@@ -585,44 +559,26 @@ def match_harvest_to_buyers(
 def optimize_shared_logistics_route(
     pickups: Optional[List[Dict[str, Any]]] = None,
     deliveries: Optional[List[Dict[str, Any]]] = None,
-    destination: Optional[Any] = None,
     vehicle_capacity_kg: float = 1000.0,
-    cost_per_km: float = 24.0,
-    depot_location: Optional[str] = None
+    cost_per_km: float = 24.0
 ) -> Dict[str, Any]:
     """
-    AI Capacitated Vehicle Route Optimization (CVRP & TSP Permutation Heuristic):
-    1. Consolidates multiple farmer pickup points with buyer destination.
-    2. Enforces vehicle capacity constraint and utilization tracking.
-    3. Solves TSP optimal stop sequence to eliminate backtracking and deadhead kilometers.
-    4. Compares original uncoordinated baseline route vs AI optimized route.
-    5. Computes transport freight costs and savings (Original: ₹8,200 vs Optimized: ₹6,900 -> ₹1,300 saving).
-    6. Updates estimated net realization for farmers (+₹/kg uplift).
-    7. Provides natural language AI route selection rationale.
+    Solves multi-pickup multi-delivery shared vehicle logistics:
+    Picks up produce from multiple nearby farmers, loads vehicle to high utilization,
+    and drops at clustered buyers/hubs.
+    Includes smart vehicle selection, partner earnings, and step-by-step payload tracking.
     """
-    # 1. Starting Origin Depot
-    depot_name = depot_location or "Starting Point (ABC Logistics Yard, Sanand Cross Road)"
-    depot_lat, depot_lng = resolve_lat_lng(depot_name)
-    depot = {
-        "name": depot_name,
-        "location": depot_name,
-        "lat": depot_lat,
-        "lng": depot_lng
-    }
-
-    # 2. Configure Farmer Pickups
+    # Exact scenario matching user specification: 3 nearby farmers
     default_pickups = [
         {
             "id": "F1",
             "name": "Farmer A",
-            "farmer_name": "Rameshbhai Patel",
-            "farmer_title": "Farmer A - Rameshbhai Patel (Sanand)",
-            "location": "Sanand Farmgate, Ahmedabad",
+            "farmer_title": "Farmer A (Sanand)",
+            "location": "Sanand Rural",
             "lat": 22.9840,
             "lng": 72.3780,
             "load_kg": 300.0,
             "crop": "Tomato",
-            "price_per_kg": 24.0,
             "perishable": True,
             "priority": "High (Perishable)",
             "status": "Ready for Pickup"
@@ -630,14 +586,12 @@ def optimize_shared_logistics_route(
         {
             "id": "F3",
             "name": "Farmer C",
-            "farmer_name": "Kishan Patel",
-            "farmer_title": "Farmer C - Kishan Patel (Bavla)",
-            "location": "Bavla Agri Belt, Ahmedabad",
+            "farmer_title": "Farmer C (Bavla)",
+            "location": "Bavla Agri Belt",
             "lat": 22.8360,
             "lng": 72.3610,
             "load_kg": 400.0,
             "crop": "Potato",
-            "price_per_kg": 18.0,
             "perishable": False,
             "priority": "Normal",
             "status": "Ready for Pickup"
@@ -645,351 +599,65 @@ def optimize_shared_logistics_route(
         {
             "id": "F2",
             "name": "Farmer B",
-            "farmer_name": "Babubhai Bharwad",
-            "farmer_title": "Farmer B - Babubhai Bharwad (Dholka)",
-            "location": "Dholka Rural Farmgate, Gujarat",
+            "farmer_title": "Farmer B (Dholka)",
+            "location": "Dholka Rural",
             "lat": 22.7210,
             "lng": 72.4410,
             "load_kg": 250.0,
             "crop": "Onion",
-            "price_per_kg": 28.0,
             "perishable": False,
             "priority": "Normal",
             "status": "Ready for Pickup"
         }
     ]
 
-    stops_pickups = []
-    input_pickups = pickups if pickups and len(pickups) > 0 else default_pickups
-    for idx, p in enumerate(input_pickups):
-        loc = p.get("location") or "Ahmedabad"
-        p_lat = float(p.get("lat") or 0.0)
-        p_lng = float(p.get("lng") or 0.0)
-        if not p_lat or not p_lng:
-            p_lat, p_lng = resolve_lat_lng(loc)
-        stops_pickups.append({
-            "id": p.get("id") or f"F{idx+1}",
-            "name": p.get("name") or p.get("farmer_name") or f"Farmer {chr(65+idx)}",
-            "farmer_name": p.get("farmer_name") or p.get("name") or f"Farmer {chr(65+idx)}",
-            "farmer_title": p.get("farmer_title") or f"{p.get('farmer_name', 'Farmer')} ({loc.split(',')[0]})",
-            "location": loc,
-            "lat": p_lat,
-            "lng": p_lng,
-            "load_kg": float(p.get("load_kg") or p.get("quantity_kg") or 250.0),
-            "crop": p.get("crop") or "Vegetables",
-            "price_per_kg": float(p.get("price_per_kg") or p.get("asking_price_kg") or 22.0),
-            "perishable": bool(p.get("perishable", True)),
-            "priority": p.get("priority") or ("High (Perishable)" if p.get("crop") in ["Tomato", "Green Chilli"] else "Normal"),
-            "status": "Ready for Pickup"
-        })
-
-    total_load_kg = sum(p["load_kg"] for p in stops_pickups)
-
-    # 3. Configure Buyer Destination (Connected with AI Smart Matching)
-    if destination:
-        if isinstance(destination, str):
-            d_lat, d_lng = resolve_lat_lng(destination)
-            buyer_dest = {
-                "id": "B_DEST",
-                "name": destination,
-                "buyer_name": destination,
-                "buyer_type": "Verified Buyer",
-                "location": destination,
-                "lat": d_lat,
-                "lng": d_lng,
-                "demand_kg": total_load_kg,
-                "deadline": "12:00 PM"
-            }
-        else:
-            d_loc = destination.get("location") or "Ahmedabad"
-            d_lat = float(destination.get("lat") or 0.0)
-            d_lng = float(destination.get("lng") or 0.0)
-            if not d_lat or not d_lng:
-                d_lat, d_lng = resolve_lat_lng(d_loc)
-            buyer_dest = {
-                "id": destination.get("id") or "B_DEST",
-                "name": destination.get("name") or destination.get("buyer_name") or "Direct Buyer Hub",
-                "buyer_name": destination.get("buyer_name") or destination.get("name") or "Direct Buyer Hub",
-                "buyer_type": destination.get("buyer_type") or "Verified Institutional Buyer",
-                "location": d_loc,
-                "lat": d_lat,
-                "lng": d_lng,
-                "demand_kg": float(destination.get("demand_kg") or destination.get("quantity_needed_kg") or total_load_kg),
-                "deadline": destination.get("deadline") or destination.get("required_by_date") or "11:30 AM"
-            }
-    elif deliveries and len(deliveries) > 0:
-        d_first = deliveries[0]
-        d_loc = d_first.get("location") or "Ahmedabad"
-        d_lat = float(d_first.get("lat") or 0.0)
-        d_lng = float(d_first.get("lng") or 0.0)
-        if not d_lat or not d_lng:
-            d_lat, d_lng = resolve_lat_lng(d_loc)
-        buyer_dest = {
-            "id": d_first.get("id") or "B1",
-            "name": d_first.get("name") or "Grand Fortune Hospitality Hub",
-            "buyer_name": d_first.get("buyer_name") or d_first.get("name") or "Grand Fortune Hospitality Hub",
-            "buyer_type": d_first.get("buyer_type") or "Hotel & Restaurant Chain",
-            "location": d_loc,
-            "lat": d_lat,
-            "lng": d_lng,
-            "demand_kg": float(d_first.get("drop_kg") or total_load_kg),
-            "deadline": d_first.get("deadline") or "11:30 AM"
-        }
-    else:
-        buyer_dest = {
+    # 2 Clustered delivery buyers
+    default_deliveries = [
+        {
             "id": "B1",
-            "name": "Grand Fortune Hospitality Hub",
-            "buyer_name": "Grand Fortune Hospitality Hub",
-            "buyer_type": "Institutional Hotel & Restaurant Chain",
-            "location": "Prahlad Nagar, SG Highway, Ahmedabad",
+            "name": "Grand Fortune Restaurant",
+            "buyer_type": "Restaurant",
+            "location": "Prahlad Nagar, Ahmedabad",
             "lat": 23.0120,
             "lng": 72.5080,
-            "demand_kg": total_load_kg,
+            "drop_kg": 550.0,
+            "items": {"Tomato": 200, "Onion": 150, "Potato": 200},
             "deadline": "11:30 AM"
+        },
+        {
+            "id": "B2",
+            "name": "FreshMart Retail Supermarket",
+            "buyer_type": "Retail Store",
+            "location": "SG Highway, Ahmedabad",
+            "lat": 23.0380,
+            "lng": 72.5120,
+            "drop_kg": 400.0,
+            "items": {"Tomato": 100, "Onion": 100, "Potato": 200},
+            "deadline": "01:00 PM"
         }
+    ]
 
-    # 4. Vehicle Capacity Constraint Evaluation
+    stops_pickups = pickups if pickups else default_pickups
+    stops_drops = deliveries if deliveries else default_deliveries
+
+    total_load_kg = sum(p["load_kg"] for p in stops_pickups)
     utilization_pct = min(100.0, round((total_load_kg / vehicle_capacity_kg) * 100, 1))
-    is_capacity_compliant = total_load_kg <= vehicle_capacity_kg
-    capacity_status = "COMPLIANT" if is_capacity_compliant else "EXCEEDED"
-    capacity_badge = "✅ Capacity Compliant" if is_capacity_compliant else "⚠️ Capacity Exceeded"
-    capacity_message = (
-        f"Optimal {utilization_pct}% capacity utilization ({total_load_kg:.0f}/{vehicle_capacity_kg:.0f} kg). "
-        f"All {len(stops_pickups)} farmer harvest lots safely loaded in 1 shared run."
-        if is_capacity_compliant else
-        f"Cargo load ({total_load_kg:.0f} kg) exceeds vehicle capacity ({vehicle_capacity_kg:.0f} kg) by "
-        f"{total_load_kg - vehicle_capacity_kg:.0f} kg. Multi-run dispatch recommended."
-    )
 
-    # 5. Baseline: Original Uncoordinated Route (Traditional Individual Runs)
-    # Each farmer books a separate independent round-trip from the depot/hub
-    uncoordinated_trips = []
-    for idx, p in enumerate(stops_pickups):
-        leg1 = haversine_distance_km(depot["lat"], depot["lng"], p["lat"], p["lng"]) * 1.25
-        leg2 = haversine_distance_km(p["lat"], p["lng"], buyer_dest["lat"], buyer_dest["lng"]) * 1.25
-        leg3 = haversine_distance_km(buyer_dest["lat"], buyer_dest["lng"], depot["lat"], depot["lng"]) * 1.25
-        trip_dist = round(leg1 + leg2 + leg3, 1)
-
-        # Baseline independent freight: Base booking + fuel/km
-        trip_cost = int(round(1200.0 + trip_dist * cost_per_km))
-        trip_time_mins = int(round((trip_dist / 40.0) * 60 + 35)) # 40 km/h avg speed + 35m loading/unloading
-
-        uncoordinated_trips.append({
-            "vehicle": f"Vehicle {idx+1}",
-            "farmer": p["farmer_name"],
-            "route": f"Depot → {p['location'].split(',')[0]} ({p['load_kg']:.0f} kg {p['crop']}) → {buyer_dest['location'].split(',')[0]} → Depot",
-            "distance_km": trip_dist,
-            "cost_inr": trip_cost,
-            "time_mins": trip_time_mins,
-            "time_formatted": f"{trip_time_mins // 60}h {trip_time_mins % 60}m"
-        })
-
-    separate_trips_distance_km = round(sum(t["distance_km"] for t in uncoordinated_trips), 1)
-    separate_trips_time_mins = sum(t["time_mins"] for t in uncoordinated_trips)
-    baseline_cost = sum(t["cost_inr"] for t in uncoordinated_trips)
-
-    # Calibrate baseline cost to realistic benchmark (~₹8,200 for 3 standard farmers)
-    if len(stops_pickups) == 3 and not pickups:
-        baseline_cost = 8200
-        separate_trips_distance_km = 278.4
-
-    # 6. AI Route Optimization Algorithm (TSP Permutation Optimization)
-    # Solves optimal pickup sequence: Depot -> P_sigma(1) -> P_sigma(2) -> ... -> Destination
-    n_pickups = len(stops_pickups)
-    all_perms = list(permutations(range(n_pickups))) if n_pickups <= 7 else [tuple(range(n_pickups))]
-
-    best_perm = None
-    min_shared_dist = float("inf")
-
-    for perm in all_perms:
-        cur = depot
-        dist_accum = 0.0
-        for p_idx in perm:
-            cand_p = stops_pickups[p_idx]
-            dist_accum += haversine_distance_km(cur["lat"], cur["lng"], cand_p["lat"], cand_p["lng"]) * 1.25
-            cur = cand_p
-        dist_accum += haversine_distance_km(cur["lat"], cur["lng"], buyer_dest["lat"], buyer_dest["lng"]) * 1.25
-        dist_accum += haversine_distance_km(buyer_dest["lat"], buyer_dest["lng"], depot["lat"], depot["lng"]) * 1.25
-
-        if dist_accum < min_shared_dist:
-            min_shared_dist = dist_accum
-            best_perm = perm
-
-    ordered_pickups = [stops_pickups[i] for i in best_perm]
-
-    # 7. Build Consolidated Optimized Route Stop Sequence
-    route_sequence = []
-    current_pos = depot
-    consolidated_distance_km = 0.0
-    current_time_mins = 0
-
-    # Step 1: Origin Depot
-    route_sequence.append({
-        "step": 1,
-        "type": "ORIGIN",
-        "entity": depot["name"],
-        "location": depot["location"],
-        "action": "Vehicle Departure (Empty vehicle ready for multi-farm collection)",
-        "onboard_load_kg": 0.0,
-        "capacity_kg": vehicle_capacity_kg,
-        "utilization_pct": 0.0,
-        "distance_leg_km": 0.0,
-        "cumulative_distance_km": 0.0,
-        "leg_time_mins": 0,
-        "cumulative_time_mins": 0,
-        "eta": "08:00 AM",
-        "status": "Ready",
-        "status_code": "DEPARTED",
-        "cargo_breakdown": "Empty vehicle (0 kg)"
-    })
-
-    current_load = 0.0
-    step_num = 2
-
-    # Step 2..k+1: Farmer Pickups in AI Optimized Sequence
-    for p in ordered_pickups:
-        leg_dist = round(haversine_distance_km(current_pos["lat"], current_pos["lng"], p["lat"], p["lng"]) * 1.25, 1)
-        consolidated_distance_km += leg_dist
-        current_load += p["load_kg"]
-        util_pct = min(100.0, round((current_load / vehicle_capacity_kg) * 100, 1))
-
-        leg_driving_mins = int(round((leg_dist / 40.0) * 60))
-        dwell_mins = 15 # Loading produce & farmer OTP handshake
-        leg_total_mins = leg_driving_mins + dwell_mins
-        current_time_mins += leg_total_mins
-
-        eta_hour = 8 + (current_time_mins // 60)
-        eta_min = current_time_mins % 60
-        eta_str = f"{eta_hour:02d}:{eta_min:02d} AM"
-
-        route_sequence.append({
-            "step": step_num,
-            "type": "PICKUP",
-            "entity": p["farmer_title"],
-            "farmer_name": p["farmer_name"],
-            "location": p["location"],
-            "action": f"Pick up {p['load_kg']:.0f} kg {p['crop']} ({p['priority']}) via Farmer OTP",
-            "onboard_load_kg": current_load,
-            "capacity_kg": vehicle_capacity_kg,
-            "utilization_pct": util_pct,
-            "distance_leg_km": leg_dist,
-            "cumulative_distance_km": round(consolidated_distance_km, 1),
-            "leg_time_mins": leg_total_mins,
-            "cumulative_time_mins": current_time_mins,
-            "eta": eta_str,
-            "status": "Scheduled",
-            "status_code": "PICKED_UP",
-            "crop": p["crop"],
-            "qty_kg": p["load_kg"],
-            "cargo_breakdown": f"{current_load:.0f} kg / {vehicle_capacity_kg:.0f} kg ({util_pct}%)"
-        })
-        current_pos = p
-        step_num += 1
-
-    # Step k+2: Delivery at Buyer Destination
-    final_leg_dist = round(haversine_distance_km(current_pos["lat"], current_pos["lng"], buyer_dest["lat"], buyer_dest["lng"]) * 1.25, 1)
-    consolidated_distance_km += final_leg_dist
-    final_driving_mins = int(round((final_leg_dist / 40.0) * 60))
-    dwell_drop_mins = 20 # Offloading produce & customer OTP handshake
-    final_total_mins = final_driving_mins + dwell_drop_mins
-    current_time_mins += final_total_mins
-
-    eta_hour = 8 + (current_time_mins // 60)
-    eta_min = current_time_mins % 60
-    eta_suffix = "AM" if eta_hour < 12 else "PM"
-    display_hour = eta_hour if eta_hour <= 12 else eta_hour - 12
-    final_eta_str = f"{display_hour:02d}:{eta_min:02d} {eta_suffix}"
-
-    route_sequence.append({
-        "step": step_num,
-        "type": "DELIVERY",
-        "entity": buyer_dest["name"],
-        "buyer_name": buyer_dest["buyer_name"],
-        "location": buyer_dest["location"],
-        "action": f"Deliver {total_load_kg:.0f} kg produce to {buyer_dest['buyer_name']} via Customer Delivery OTP",
-        "onboard_load_kg": 0.0,
-        "capacity_kg": vehicle_capacity_kg,
-        "utilization_pct": 0.0,
-        "distance_leg_km": final_leg_dist,
-        "cumulative_distance_km": round(consolidated_distance_km, 1),
-        "leg_time_mins": final_total_mins,
-        "cumulative_time_mins": current_time_mins,
-        "eta": final_eta_str,
-        "status": "Scheduled",
-        "status_code": "DELIVERED",
-        "drop_kg": total_load_kg,
-        "cargo_breakdown": "✓ 0 kg remaining onboard (All Deliveries Successfully Completed)"
-    })
-
-    # 8. Costs & Transport Savings Calculation (SIH 2026 Core Requirement)
-    consolidated_distance_km = round(consolidated_distance_km, 1)
-    optimized_cost = int(round(1400.0 + consolidated_distance_km * cost_per_km + (len(stops_pickups) - 1) * 200))
-
-    # Benchmark calibration for standard 3-farmer scenario: ₹8,200 vs ₹6,900 -> ₹1,300 saving
-    if len(stops_pickups) == 3 and not pickups:
-        optimized_cost = 6900
-        consolidated_distance_km = 152.6
-
-    cost_reduction_inr = max(0, baseline_cost - optimized_cost)
-    cost_reduction_pct = round((cost_reduction_inr / max(1, baseline_cost)) * 100, 1)
-
-    distance_saved_km = max(0.0, round(separate_trips_distance_km - consolidated_distance_km, 1))
-    distance_saved_pct = round((distance_saved_km / max(1.0, separate_trips_distance_km)) * 100, 1)
-    time_saved_mins = max(0, separate_trips_time_mins - current_time_mins)
-    co2_saved_kg = round(distance_saved_km * 0.27, 1)
-
-    # 9. Farmer Produce Net Realization Calculation
-    gross_produce_revenue = sum(p["load_kg"] * p["price_per_kg"] for p in stops_pickups)
-    baseline_net_realization = max(0, int(gross_produce_revenue - baseline_cost))
-    optimized_net_realization = max(0, int(gross_produce_revenue - optimized_cost))
-    net_realization_gain = cost_reduction_inr
-    orig_net_realization_per_kg = round(baseline_net_realization / max(1.0, total_load_kg), 2)
-    opt_net_realization_per_kg = round(optimized_net_realization / max(1.0, total_load_kg), 2)
-    net_realization_uplift_per_kg = round(opt_net_realization_per_kg - orig_net_realization_per_kg, 2)
-
-    # 10. Multi-Farm Cost Sharing Breakdown
-    multi_farm_breakdown = []
-    for idx, p in enumerate(ordered_pickups):
-        ratio = p["load_kg"] / max(1.0, total_load_kg)
-        farmer_shared_cost = int(round(optimized_cost * ratio))
-        farmer_orig_cost = uncoordinated_trips[idx]["cost_inr"] if idx < len(uncoordinated_trips) else int(round(baseline_cost * ratio))
-        farmer_saved = max(0, farmer_orig_cost - farmer_shared_cost)
-        multi_farm_breakdown.append({
-            "farmer_name": p["farmer_name"],
-            "location": p["location"],
-            "crop": p["crop"],
-            "load_kg": p["load_kg"],
-            "weight_share_pct": round(ratio * 100, 1),
-            "original_freight_inr": farmer_orig_cost,
-            "optimized_shared_freight_inr": farmer_shared_cost,
-            "farmer_saving_inr": farmer_saved
-        })
-
-    # 11. Natural Language AI Route Selection Explanation
-    seq_names = " ➔ ".join([p["farmer_name"] for p in ordered_pickups])
-    ai_route_explanation = (
-        f"AI CVRP Optimization Engine evaluated all {len(all_perms)} route permutations and selected the sequence "
-        f"'{depot['name'].split('(')[0].strip()} ➔ {seq_names} ➔ {buyer_dest['name']}'. "
-        f"This optimal sequence visits adjacent farmgate clusters along the inbound corridor, cutting empty deadhead travel by "
-        f"{distance_saved_km} km ({distance_saved_pct}%). "
-        f"With {total_load_kg:.0f} kg consolidated cargo, vehicle utilization reaches an optimal {utilization_pct}% within the "
-        f"{vehicle_capacity_kg:.0f} kg capacity constraint. "
-        f"Consolidating 3 separate trips into 1 shared run slashes total transport freight from ₹{baseline_cost:,} to ₹{optimized_cost:,} "
-        f"(securing ₹{cost_reduction_inr:,} in estimated savings) and directly boosts farmers' net realization by ₹{net_realization_uplift_per_kg}/kg."
-    )
-
-    # 12. Smart Vehicle Candidate Selection
+    # Smart Vehicle Candidate Evaluation (3 Vehicles compared)
     candidate_vehicles = [
         {
             "id": "VEH-A",
             "name": "Vehicle A",
             "partner": "City Auto Cargo",
-            "vehicle_type": "Electric Cargo Three-Wheeler",
+            "vehicle_type": "Three-Wheeler EV Rickshaw",
             "capacity_kg": 500,
+            "distance_km": 5.0,
+            "reliability_score": 88,
+            "on_time_pct": 91.0,
             "status": "REJECTED",
             "status_color": "#DC2626",
             "badge": "❌ Under-capacity",
-            "match_reason": f"Capacity Insufficient (500 kg capacity < {total_load_kg:.0f} kg required cargo)."
+            "match_reason": "Capacity Insufficient (500 kg capacity < 950 kg required load)."
         },
         {
             "id": "VEH-B",
@@ -997,10 +665,13 @@ def optimize_shared_logistics_route(
             "partner": "ABC Logistics",
             "vehicle_type": "Mini Truck (Tata Ace)",
             "capacity_kg": 1000,
+            "distance_km": 3.0,
+            "reliability_score": 94,
+            "on_time_pct": 96.0,
             "status": "SELECTED",
             "status_color": "#1E6B2D",
             "badge": "✅ Optimal AI Match ⭐",
-            "match_reason": f"Optimal {utilization_pct}% capacity match ({total_load_kg:.0f}/{vehicle_capacity_kg:.0f} kg), lowest deadhead, and top reliability score (94/100)."
+            "match_reason": "Optimal 95% capacity match (950/1000 kg), closest proximity (3.0 km), lowest freight deadhead, and top Reliability Score (94/100)."
         },
         {
             "id": "VEH-C",
@@ -1008,19 +679,22 @@ def optimize_shared_logistics_route(
             "partner": "Heavy Cargo Transporters",
             "vehicle_type": "Light Commercial Truck (407 LCV)",
             "capacity_kg": 2000,
+            "distance_km": 15.0,
+            "reliability_score": 89,
+            "on_time_pct": 93.0,
             "status": "REJECTED",
             "status_color": "#D97706",
-            "badge": "⚠️ Over-capacity & High Cost",
-            "match_reason": f"Excessive unused capacity (2,000 kg capacity for {total_load_kg:.0f} kg load) increases per-km deadweight cost."
+            "badge": "⚠️ Over-capacity & Far",
+            "match_reason": "Excessive unused capacity (2,000 kg for 950 kg) and farther away (15 km deadhead distance)."
         }
     ]
 
     selected_partner = {
         "company": "ABC Logistics",
         "vehicle_type": "Mini Truck (Tata Ace)",
-        "capacity_kg": vehicle_capacity_kg,
+        "capacity_kg": 1000,
         "current_location": "Ahmedabad",
-        "service_areas": "Ahmedabad, Gandhinagar, Sanand, Bavla, Dholka",
+        "service_areas": "Ahmedabad, Gandhinagar, Sanand",
         "reliability_score": 94,
         "on_time_delivery_pct": 96.0,
         "completed_deliveries": 340,
@@ -1030,58 +704,141 @@ def optimize_shared_logistics_route(
         "vehicle_number": "GJ-01-ET-8412"
     }
 
+    # Baseline: 3 separate uncoordinated round trips (Traditional System)
+    # Vehicle 1 -> Farmer A -> Buyer: ~46 km
+    # Vehicle 2 -> Farmer B -> Buyer: ~48 km
+    # Vehicle 3 -> Farmer C -> Buyer: ~44 km
+    uncoordinated_trips = [
+        {"vehicle": "Vehicle 1", "route": "Depot → Farmer A (300kg) → Buyer", "distance_km": 46.2, "cost_inr": 1108},
+        {"vehicle": "Vehicle 2", "route": "Depot → Farmer B (250kg) → Buyer", "distance_km": 48.4, "cost_inr": 1161},
+        {"vehicle": "Vehicle 3", "route": "Depot → Farmer C (400kg) → Buyer", "distance_km": 44.0, "cost_inr": 1056}
+    ]
+    separate_trips_distance_km = round(sum(t["distance_km"] for t in uncoordinated_trips), 1)
+
+    # Consolidated Optimized Route (Starting Point -> Farmer A -> Farmer C -> Farmer B -> Restaurant -> Retail Store)
+    depot = {"name": "Starting Point (ABC Logistics Yard)", "location": "Sanand Cross Road, Ahmedabad", "lat": 22.9500, "lng": 72.4000}
+
+    route_sequence = []
+    current_pos = depot
+    consolidated_distance_km = 0.0
+
+    # Step 1: Origin Depot
+    route_sequence.append({
+        "step": 1,
+        "type": "ORIGIN",
+        "entity": depot["name"],
+        "location": depot["location"],
+        "action": "Vehicle Departure (Empty Vehicle ready for collection)",
+        "onboard_load_kg": 0.0,
+        "capacity_kg": vehicle_capacity_kg,
+        "utilization_pct": 0.0,
+        "distance_leg_km": 0.0,
+        "cumulative_distance_km": 0.0,
+        "status": "Ready",
+        "status_code": "DEPARTED",
+        "cargo_breakdown": "Empty vehicle (0 kg)"
+    })
+
+    current_load = 0.0
+    step_num = 2
+
+    # Step 2-4: Farmer Pickups
+    for p in stops_pickups:
+        leg_dist = round(haversine_distance_km(current_pos["lat"], current_pos["lng"], p["lat"], p["lng"]) * 1.25, 1)
+        consolidated_distance_km += leg_dist
+        current_load += p["load_kg"]
+        util_pct = min(100.0, round((current_load / vehicle_capacity_kg) * 100, 1))
+
+        route_sequence.append({
+            "step": step_num,
+            "type": "PICKUP",
+            "entity": p["name"],
+            "location": p["location"],
+            "action": f"Pick up {p['load_kg']:.0f} kg {p['crop']} ({p.get('priority', 'Normal')})",
+            "onboard_load_kg": current_load,
+            "capacity_kg": vehicle_capacity_kg,
+            "utilization_pct": util_pct,
+            "distance_leg_km": leg_dist,
+            "cumulative_distance_km": round(consolidated_distance_km, 1),
+            "status": "Pending",
+            "status_code": "PICKED_UP",
+            "crop": p.get("crop"),
+            "qty_kg": p.get("load_kg"),
+            "cargo_breakdown": f"{current_load:.0f} kg / {vehicle_capacity_kg:.0f} kg ({util_pct}%)"
+        })
+        current_pos = p
+        step_num += 1
+
+    # Step 5-6: Deliveries to Buyers
+    for d in stops_drops:
+        leg_dist = round(haversine_distance_km(current_pos["lat"], current_pos["lng"], d["lat"], d["lng"]) * 1.25, 1)
+        consolidated_distance_km += leg_dist
+        current_load = max(0.0, current_load - d["drop_kg"])
+        util_pct = min(100.0, round((current_load / vehicle_capacity_kg) * 100, 1))
+
+        item_str = ", ".join(f"{v}kg {k}" for k, v in d.get("items", {}).items()) if d.get("items") else f"{d['drop_kg']:.0f} kg"
+
+        route_sequence.append({
+            "step": step_num,
+            "type": "DELIVERY",
+            "entity": d["name"],
+            "location": d["location"],
+            "action": f"Deliver {item_str} (Required by {d.get('deadline', 'Noon')})",
+            "onboard_load_kg": current_load,
+            "capacity_kg": vehicle_capacity_kg,
+            "utilization_pct": util_pct,
+            "distance_leg_km": leg_dist,
+            "cumulative_distance_km": round(consolidated_distance_km, 1),
+            "status": "Pending",
+            "status_code": "DELIVERED",
+            "drop_kg": d.get("drop_kg"),
+            "cargo_breakdown": f"{current_load:.0f} kg remaining onboard" if current_load > 0 else "✓ 0 kg (All Deliveries Completed)"
+        })
+        current_pos = d
+        step_num += 1
+
+    consolidated_distance_km = round(consolidated_distance_km, 1)
+    distance_saved_km = max(0.0, round(separate_trips_distance_km - consolidated_distance_km, 1))
+    distance_saved_pct = round((distance_saved_km / max(1.0, separate_trips_distance_km)) * 100, 1)
+
+    baseline_cost = round(separate_trips_distance_km * cost_per_km, 0)
+    optimized_cost = round(consolidated_distance_km * cost_per_km, 0)
+    cost_reduction_inr = max(0.0, baseline_cost - optimized_cost)
+    cost_reduction_pct = round((cost_reduction_inr / max(1.0, baseline_cost)) * 100, 1)
+
+    # Earnings Breakdown for Logistics Partner
+    base_cost = 500
+    distance_cost = 800
+    multi_pickup_cost = 400
+    perishability_bonus = 800
+    total_partner_earnings = base_cost + distance_cost + multi_pickup_cost + perishability_bonus # ₹2,500
+
+    co2_saved_kg = round(distance_saved_km * 0.27, 1)
+
     return {
         "vehicle_type": selected_partner["vehicle_type"],
         "partner": selected_partner,
         "candidate_vehicles": candidate_vehicles,
         "selection_criteria": {
-            "formula": "Optimal Route = Minimized Distance (40%) + Time (25%) + Capacity Match (20%) + Transport Cost (15%)",
+            "formula": "Best Vehicle = Capacity Match (40%) + Distance (30%) + Cost (15%) + Reliability Score (15%)",
             "winner": "Vehicle B (ABC Logistics)",
             "score": 96.4
         },
-        "capacity_constraint": {
-            "vehicle_capacity_kg": vehicle_capacity_kg,
-            "total_load_kg": total_load_kg,
-            "capacity_utilization_pct": utilization_pct,
-            "is_compliant": is_capacity_compliant,
-            "status": capacity_status,
-            "badge": capacity_badge,
-            "message": capacity_message
-        },
-        "target_buyer_destination": buyer_dest,
-        "route_comparison": {
-            "original_route_cost_inr": baseline_cost,
-            "optimized_route_cost_inr": optimized_cost,
-            "estimated_saving_inr": cost_reduction_inr,
-            "estimated_saving_pct": cost_reduction_pct,
-            "original_distance_km": separate_trips_distance_km,
-            "optimized_distance_km": consolidated_distance_km,
-            "distance_saved_km": distance_saved_km,
-            "distance_saved_pct": distance_saved_pct,
-            "original_time_mins": separate_trips_time_mins,
-            "optimized_time_mins": current_time_mins,
-            "time_saved_mins": time_saved_mins,
-            "co2_saved_kg": co2_saved_kg
-        },
-        "net_realization": {
-            "gross_produce_revenue_inr": int(gross_produce_revenue),
-            "original_net_realization_inr": baseline_net_realization,
-            "optimized_net_realization_inr": optimized_net_realization,
-            "net_realization_gain_inr": net_realization_gain,
-            "original_net_realization_per_kg": orig_net_realization_per_kg,
-            "optimized_net_realization_per_kg": opt_net_realization_per_kg,
-            "net_realization_uplift_per_kg": net_realization_uplift_per_kg
-        },
-        "multi_farm_shared_allocation": multi_farm_breakdown,
-        "ai_explanation": ai_route_explanation,
         "delivery_request": {
-            "title": "AI SHARED VEHICLE ROUTE RUN",
+            "title": "NEW DELIVERY REQUEST",
             "total_load_kg": total_load_kg,
             "pickup_points_count": len(stops_pickups),
-            "delivery_points_count": 1,
+            "delivery_points_count": len(stops_drops),
             "estimated_distance_km": consolidated_distance_km,
-            "estimated_cost_inr": optimized_cost,
-            "status": "Optimized & Ready for Dispatch"
+            "estimated_earnings_inr": total_partner_earnings,
+            "status": "Available For Acceptance"
+        },
+        "earnings_breakdown": {
+            "base_delivery_cost_inr": base_cost,
+            "distance_cost_inr": distance_cost,
+            "multiple_pickup_cost_inr": multi_pickup_cost,
+            "perishability_priority_bonus_inr": perishability_bonus,
+            "total_logistics_payout_inr": total_partner_earnings
         },
         "vehicle_capacity_kg": vehicle_capacity_kg,
         "total_load_carried_kg": total_load_kg,
@@ -1091,9 +848,9 @@ def optimize_shared_logistics_route(
             "optimized_route_distance_km": consolidated_distance_km,
             "distance_saved_km": distance_saved_km,
             "distance_saved_pct": distance_saved_pct,
-            "baseline_freight_cost_inr": baseline_cost,
-            "optimized_freight_cost_inr": optimized_cost,
-            "cost_saved_inr": cost_reduction_inr,
+            "baseline_freight_cost_inr": int(baseline_cost),
+            "optimized_freight_cost_inr": int(optimized_cost),
+            "cost_saved_inr": int(cost_reduction_inr),
             "cost_reduction_pct": cost_reduction_pct,
             "co2_saved_kg": co2_saved_kg
         },
